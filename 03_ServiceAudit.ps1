@@ -22,18 +22,18 @@ $Stamp = Get-Date -Format "yyyyMMdd_HHmm"
 
 Write-Banner "SERVICE & PORT AUDIT" "Cyan"
 
-# ── Known dangerous services to flag ────────────────────────────────────────
+# -- Known dangerous services to flag -----------------------------------------
 $dangerousServices = @(
     "Telnet", "TlntSvr", "RemoteRegistry", "SSDPSRV", "upnphost",
-    "WinRM",  # Flag for review — may be needed but should be restricted
-    "W3SVC",  # IIS — note if present
-    "FTPSVC", # IIS FTP
+    "WinRM",
+    "W3SVC",
+    "FTPSVC",
     "SharedAccess", "icsdl"
 )
 
 $knownDangerous = @("Telnet", "TlntSvr", "RemoteRegistry")
 
-# ── 1. Running Services ──────────────────────────────────────────────────────
+# -- 1. Running Services ------------------------------------------------------
 Write-STEP "Running Services"
 
 $running = Get-Service | Where-Object { $_.Status -eq "Running" } |
@@ -46,27 +46,27 @@ $running | Select-Object Name, DisplayName, Status, StartType |
 Write-INFO "Total running: $($running.Count)   Log: $serviceLog"
 Write-Host ""
 Write-Host "  Name                         DisplayName" -ForegroundColor DarkGray
-Write-Host "  ──────────────────────────── ─────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host "  --------------------------   -------------------------------------" -ForegroundColor DarkGray
 
-foreach ($svc in $running) { # Go through each service and flag if it's known dangerous or just suspicious
-    $color = "White" 
+foreach ($svc in $running) {
+    $color = "White"
     $flag  = ""
     if ($knownDangerous -contains $svc.Name) {
-        $color = "Red"; $flag = " ◄ DANGEROUS — DISABLE THIS"
+        $color = "Red"; $flag = " << DANGEROUS - DISABLE THIS"
     } elseif ($dangerousServices -contains $svc.Name) {
-        $color = "Yellow"; $flag = " ◄ Review"
+        $color = "Yellow"; $flag = " << Review"
     }
     $nameStr = $svc.Name.PadRight(30)
     Write-Host "  $nameStr $($svc.DisplayName)$flag" -ForegroundColor $color
 }
 
-# ── 2. Prompt to Disable Dangerous Services ──────────────────────────────────
+# -- 2. Prompt to Disable Dangerous Services ----------------------------------
 Write-STEP "Dangerous Service Check"
 
 foreach ($svcName in $knownDangerous) {
     $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
     if ($svc -and $svc.Status -eq "Running") {
-        Write-CRIT "$svcName is RUNNING — this should almost never be on"
+        Write-CRIT "$svcName is RUNNING - this should almost never be on"
         $disable = Read-Host "  Disable $svcName now? (y/N)"
         if ($disable -eq 'y') {
             Stop-Service -Name $svcName -Force -ErrorAction SilentlyContinue
@@ -79,7 +79,7 @@ foreach ($svcName in $knownDangerous) {
 # PrintNightmare check
 $spooler = Get-Service -Name Spooler -ErrorAction SilentlyContinue
 if ($spooler -and $spooler.Status -eq "Running") {
-    Write-WARN "Print Spooler is running (PrintNightmare risk — CVE-2021-34527)"
+    Write-WARN "Print Spooler is running (PrintNightmare risk - CVE-2021-34527)"
     $disableSpooler = Read-Host "  Disable Print Spooler? (only safe if no printing needed) (y/N)"
     if ($disableSpooler -eq 'y') {
         Stop-Service -Name Spooler -Force
@@ -101,12 +101,11 @@ if ($smb1) {
     Write-OK "SMBv1 is already disabled"
 }
 
-# ── 3. Listening Ports (Full -p- equivalent) ─────────────────────────────────
+# -- 3. Listening Ports -------------------------------------------------------
 Write-STEP "All Listening Ports (with Process)"
 
 $portLog = "$LogDir\Ports_$Stamp.csv"
 
-# Known expected ports reference
 $knownPorts = @{
     80   = "HTTP / IIS"
     443  = "HTTPS / IIS"
@@ -116,7 +115,6 @@ $knownPorts = @{
     53   = "DNS"
     88   = "Kerberos (DC)"
     389  = "LDAP (DC)"
-    443  = "HTTPS"
     445  = "SMB"
     636  = "LDAPS (DC)"
     1433 = "MSSQL"
@@ -132,46 +130,45 @@ $suspiciousPorts = @(23, 4444, 4445, 1234, 31337, 9001, 6666, 7777, 8888)
 
 $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue
 
-$portData = foreach ($conn in $connections) { # go through all listening ports, get process info, and flag if it's known or suspicious
-    $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue # Get process info for the owning PID
-    $desc = if ($knownPorts.ContainsKey([int]$conn.LocalPort)) { $knownPorts[[int]$conn.LocalPort] } else { "Unknown" } # Get known description or mark as unknown
-    [PSCustomObject]@{ 
+$portData = foreach ($conn in $connections) {
+    $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+    $desc = if ($knownPorts.ContainsKey([int]$conn.LocalPort)) { $knownPorts[[int]$conn.LocalPort] } else { "Unknown" }
+    [PSCustomObject]@{
         Port       = $conn.LocalPort
         Address    = $conn.LocalAddress
         PID        = $conn.OwningProcess
         Process    = if ($proc) { $proc.Name } else { "UNKNOWN" }
-        Executable = if ($proc) { $proc.MainModule.FileName } else { "N/A" }
+        Executable = if ($proc) { try { $proc.MainModule.FileName } catch { "N/A" } } else { "N/A" }
         KnownDesc  = $desc
     }
 }
 
-$portData | Export-Csv -Path $portLog -NoTypeInformation # Save full port data to CSV for review
+$portData | Export-Csv -Path $portLog -NoTypeInformation
 Write-INFO "Port log: $portLog"
 Write-Host ""
 Write-Host "  Port   Address          PID    Process            Description" -ForegroundColor DarkGray
-Write-Host "  ─────  ───────────────  ─────  ─────────────────  ──────────────────────" -ForegroundColor DarkGray
+Write-Host "  -----  ---------------  -----  -----------------  ----------------------" -ForegroundColor DarkGray
 
 foreach ($p in $portData | Sort-Object Port) {
     $color = "White"
     $flag  = ""
-    if ($suspiciousPorts -contains [int]$p.Port) { # Flag known suspicious ports
-        $color = "Red"; $flag = " ◄ SUSPICIOUS PORT"
-    } elseif ($p.KnownDesc -eq "Unknown") { # Flag unknown ports for review
-        $color = "Yellow"; $flag = " ◄ Unknown — investigate"
-    } elseif ($p.Address -eq "0.0.0.0") { # Flag services listening on all interfaces
+    if ($suspiciousPorts -contains [int]$p.Port) {
+        $color = "Red"; $flag = " << SUSPICIOUS PORT"
+    } elseif ($p.KnownDesc -eq "Unknown") {
+        $color = "Yellow"; $flag = " << Unknown - investigate"
+    } elseif ($p.Address -eq "0.0.0.0") {
         $color = "Cyan"; $flag = " (exposed on all interfaces)"
     }
 
-    #Alignment for display 
-    $portStr = $p.Port.ToString().PadRight(6) 
+    $portStr = $p.Port.ToString().PadRight(6)
     $addrStr = $p.Address.PadRight(16)
     $pidStr  = $p.PID.ToString().PadRight(6)
     $procStr = $p.Process.PadRight(18)
 
-    Write-Host "  $portStr $addrStr $pidStr $procStr $($p.KnownDesc)$flag" -ForegroundColor $color # Display the port info with flags and color coding
+    Write-Host "  $portStr $addrStr $pidStr $procStr $($p.KnownDesc)$flag" -ForegroundColor $color
 }
 
-# ── 4. Established Outbound Connections (C2 detection) ───────────────────────
+# -- 4. Established Outbound Connections (C2 detection) -----------------------
 Write-STEP "Established Outbound Connections (C2 / Beaconing Check)"
 
 $established = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue |
@@ -181,7 +178,7 @@ $c2Ports = @(4444, 4445, 1234, 6666, 7777, 8888, 9001, 9002, 31337)
 
 Write-Host ""
 Write-Host "  Remote Address            Remote Port  Process           Flag" -ForegroundColor DarkGray
-Write-Host "  ────────────────────────  ───────────  ────────────────  ────────────────────" -ForegroundColor DarkGray
+Write-Host "  ------------------------  -----------  ----------------  --------------------" -ForegroundColor DarkGray
 
 foreach ($conn in $established) {
     $proc  = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
@@ -189,9 +186,9 @@ foreach ($conn in $established) {
     $flag  = ""
 
     if ($c2Ports -contains [int]$conn.RemotePort) {
-        $color = "Red"; $flag = "◄ LIKELY C2 BEACON"
+        $color = "Red"; $flag = "<< LIKELY C2 BEACON"
     } elseif ($conn.RemotePort -notin @(80, 443, 53, 25, 587, 993, 995)) {
-        $color = "Yellow"; $flag = "◄ Unusual port"
+        $color = "Yellow"; $flag = "<< Unusual port"
     }
 
     $remoteStr = $conn.RemoteAddress.PadRight(25)
@@ -200,19 +197,19 @@ foreach ($conn in $established) {
     Write-Host "  $remoteStr $portStr $procStr $flag" -ForegroundColor $color
 }
 
-# ── 5. SMB Shares ────────────────────────────────────────────────────────────
+# -- 5. SMB Shares ------------------------------------------------------------
 Write-STEP "SMB Shares"
 
 $shares = Get-SmbShare
 $adminShares = @("ADMIN$", "C$", "IPC$", "D$", "E$")
 
-foreach ($share in $shares) { # Go through each share and flag if it's known dangerous or just suspicious
+foreach ($share in $shares) {
     $color = if ($adminShares -contains $share.Name) { "DarkGray" } else { "Yellow" }
-    $flag  = if ($adminShares -notcontains $share.Name) { " ◄ Non-default share — verify!" } else { " (default admin share)" }
+    $flag  = if ($adminShares -notcontains $share.Name) { " << Non-default share - verify!" } else { " (default admin share)" }
     Write-Host "  $($share.Name.PadRight(20)) Path: $($share.Path)$flag" -ForegroundColor $color
 }
 
-# ── Done ─────────────────────────────────────────────────────────────────────
+# -- Done ---------------------------------------------------------------------
 Write-Host ""
 Write-OK "Service & port audit complete"
 Write-Host ""
