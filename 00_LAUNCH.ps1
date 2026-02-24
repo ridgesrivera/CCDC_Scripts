@@ -38,16 +38,11 @@ Export-ModuleMember -Function * -ErrorAction SilentlyContinue
 #  MAIN MENU
 # ─────────────────────────────────────────────
 Clear-Host
-Write-Host @"
-
-  ██████╗  ██████╗ ██████╗ ███████╗
-  ██╔══██╗██╔════╝██╔══██╗██╔════╝
-  ██████╔╝██║     ██║  ██║██║       CCDC BLUE TEAM
-  ██╔══██╗██║     ██║  ██║██║       Windows First 30 Minutes
-  ██████╔╝╚██████╗██████╔╝███████╗  v1.0
-  ╚═════╝  ╚═════╝╚═════╝ ╚══════╝
-
-"@ -ForegroundColor Cyan
+Write-Host "=======================================" -ForegroundColor Cyan
+Write-Host "   CCDC BLUE TEAM                      " -ForegroundColor Cyan
+Write-Host "   Windows First 30 Minutes  v1.0      " -ForegroundColor Cyan
+Write-Host "=======================================" -ForegroundColor Cyan
+Write-Host ""
 
 Write-Host "  Log directory: $Global:LogPath" -ForegroundColor DarkGray
 Write-Host ""
