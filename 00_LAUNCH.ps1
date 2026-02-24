@@ -1,4 +1,7 @@
 #Requires -RunAsAdministrator
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+chcp 65001 | Out-Null
 <#
 .SYNOPSIS
     CCDC Blue Team - Windows First 30 Minutes Launcher
