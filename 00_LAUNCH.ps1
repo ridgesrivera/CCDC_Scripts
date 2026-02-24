@@ -68,8 +68,7 @@ foreach ($s in $scripts) {
     $keyColor = if ($s.Key -eq "A") { "Yellow" } elseif ($s.Key -eq "Q") { "DarkGray" } else { "White" }
     Write-Host "  [$($s.Key)] " -NoNewline -ForegroundColor $keyColor
     Write-Host "$($s.Name)" -NoNewline -ForegroundColor Cyan
-    if ($s.Desc) { Write-Host "  — $($s.Desc)" -ForegroundColor DarkGray } else { Write-Host "" }
-}
+    if ($s.Desc) { Write-Host "  - $($s.Desc)" -ForegroundColor DarkGray }}
 
 Write-Host ""
 $choice = Read-Host "Select option"
