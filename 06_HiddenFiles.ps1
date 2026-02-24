@@ -1,15 +1,3 @@
-<# 
-Ridge Checked: NO
-Ran on a test box: NO 
-
-Improvements: 
-
-
-Order of Operations:  
-1)
-4) Generate report and output findings to "C:\CCDC_Logs"
-#>
-
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
@@ -29,23 +17,22 @@ function Write-CRIT   { param([string]$m) Write-Host "  [CRIT] $m" -ForegroundCo
 function Write-INFO   { param([string]$m) Write-Host "  [INFO] $m" -ForegroundColor Cyan   }
 function Write-STEP   { param([string]$m) Write-Host "`n>> $m" -ForegroundColor Magenta   }
 
-$LogDir = "C:\CCDC_Logs" #Save files to CCDC_Logs 
-New-Item -ItemType Directory -Path $LogDir -Force | Out-Null # Create the directory
-$Stamp  = Get-Date -Format "yyyyMMdd_HHmm"  # Stamp Date
-$Report = "$LogDir\HiddenFiles_$Stamp.csv" # File Name
+$LogDir = "C:\CCDC_Logs"
+New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+$Stamp  = Get-Date -Format "yyyyMMdd_HHmm"
+$Report = "$LogDir\HiddenFiles_$Stamp.csv"
 
-Write-Banner "HIDDEN FILE & WEBSHELL HUNT" "Red" 
+Write-Banner "HIDDEN FILE & WEBSHELL HUNT" "Red"
 
-$findings = [System.Collections.ArrayList]@() #
+$findings = [System.Collections.ArrayList]@()
 
-# ── 1. Webshell Detection ────────────────────────────────────────────────────
+# -- 1. Webshell Detection ----------------------------------------------------
 Write-STEP "Webshell Detection (IIS / Web Directories)"
 
-$webRoots = @("C:\inetpub", "C:\wwwroot", "C:\WebApps") # Commmon List of webroots 
-$webshellExtensions = @("*.asp", "*.aspx", "*.php", "*.php3", "*.php5", 
-                         "*.phtml", "*.shtml", "*.ashx", "*.asmx") 
+$webRoots = @("C:\inetpub", "C:\wwwroot", "C:\WebApps")
+$webshellExtensions = @("*.asp", "*.aspx", "*.php", "*.php3", "*.php5",
+                         "*.phtml", "*.shtml", "*.ashx", "*.asmx")
 
-# Dangerous code patterns commonly found in webshells (Looks for these for vulnerabilities)
 $shellPatterns = @(
     @{ Name = "cmd execution (eval)";   Pattern = 'eval\s*\(' },
     @{ Name = "exec() call";            Pattern = '(exec|shell_exec|passthru|system)\s*\(' },
@@ -59,21 +46,20 @@ $shellPatterns = @(
     @{ Name = "China Chopper pattern";  Pattern = 'z_execute|z_stream_copy|z_inflate' }
 )
 
-# For each web root 
 foreach ($root in $webRoots) {
     if (-not (Test-Path $root)) { continue }
-    Write-INFO "Scanning: $root"  # State which web root we are looking into
+    Write-INFO "Scanning: $root"
 
-    foreach ($ext in $webshellExtensions) { # for each 
+    foreach ($ext in $webshellExtensions) {
         $files = Get-ChildItem -Path $root -Recurse -Filter $ext -Force -ErrorAction SilentlyContinue
-        foreach ($f in $files) { 
+        foreach ($f in $files) {
             try {
                 $content = Get-Content $f.FullName -Raw -ErrorAction Stop
                 $hits = @()
                 foreach ($pat in $shellPatterns) {
                     if ($content -imatch $pat.Pattern) { $hits += $pat.Name }
                 }
-                if ($hits.Count -ge 2) { 
+                if ($hits.Count -ge 2) {
                     Write-CRIT "LIKELY WEBSHELL: $($f.FullName)"
                     Write-Host "    Patterns: $($hits -join ', ')" -ForegroundColor Red
                     $null = $findings.Add([PSCustomObject]@{
@@ -92,7 +78,7 @@ foreach ($root in $webRoots) {
     }
 }
 
-# ── 2. Recently Modified Web Files ───────────────────────────────────────────
+# -- 2. Recently Modified Web Files -------------------------------------------
 Write-STEP "Recently Modified Web Files (last 48 hours)"
 
 $cutoff = (Get-Date).AddHours(-48)
@@ -109,7 +95,7 @@ foreach ($root in $webRoots) {
     }
 }
 
-# ── 3. Hidden Files in Key Locations ─────────────────────────────────────────
+# -- 3. Hidden Files in Key Locations -----------------------------------------
 Write-STEP "Hidden Files in Key System Locations"
 
 $hiddenSearchPaths = @(
@@ -121,7 +107,7 @@ $hiddenSearchPaths = @(
 
 $suspiciousHiddenNames = @(
     "*.exe", "*.dll", "*.bat", "*.ps1", "*.vbs", "*.js", "*.hta",
-    "svchost*", "svch0st*", "lsass*", "csrss*", "winlogon*"  # Common masquerade names
+    "svchost*", "svch0st*", "lsass*", "csrss*", "winlogon*"
 )
 
 foreach ($path in $hiddenSearchPaths) {
@@ -143,10 +129,9 @@ foreach ($path in $hiddenSearchPaths) {
     }
 }
 
-# ── 4. Suspicious Filenames (Masquerading) ───────────────────────────────────
+# -- 4. Suspicious Filenames (Masquerading) -----------------------------------
 Write-STEP "Process Masquerading / Suspicious Executables"
 
-# Check executables in writable locations (red team often drops here)
 $writableLocations = @(
     "C:\Users\*\AppData\Local\Temp",
     "C:\Users\*\AppData\Roaming",
@@ -161,11 +146,10 @@ foreach ($pattern in $writableLocations) {
     foreach ($ext in $exeExtensions) {
         $files = Get-ChildItem -Path $pattern -Filter $ext -Recurse -Force -ErrorAction SilentlyContinue
         foreach ($f in $files) {
-            # Check if binary is signed
             $sig = Get-AuthenticodeSignature -FilePath $f.FullName -ErrorAction SilentlyContinue
             $sigStatus = if ($sig) { $sig.Status } else { "Unknown" }
             $color = if ($sigStatus -eq "Valid") { "DarkGray" } else { "Yellow" }
-            $flag  = if ($sigStatus -ne "Valid") { " ◄ UNSIGNED — investigate" } else { "" }
+            $flag  = if ($sigStatus -ne "Valid") { " << UNSIGNED - investigate" } else { "" }
 
             Write-Host "  $($f.FullName)  [Sig: $sigStatus]$flag" -ForegroundColor $color
 
@@ -179,7 +163,7 @@ foreach ($pattern in $writableLocations) {
     }
 }
 
-# ── 5. NTFS Alternate Data Streams ───────────────────────────────────────────
+# -- 5. NTFS Alternate Data Streams -------------------------------------------
 Write-STEP "NTFS Alternate Data Streams (ADS) Detection"
 Write-INFO "ADS can be used to hide malicious content in normal-looking files"
 
@@ -191,7 +175,7 @@ foreach ($path in $adsPaths) {
                     Get-Item -Stream * -ErrorAction SilentlyContinue |
                     Where-Object { $_.Stream -ne ':$DATA' -and $_.Stream -ne '' }
         foreach ($ads in $adsFiles) {
-            Write-CRIT "ADS detected: $($ads.FileName) → Stream: $($ads.Stream) ($($ads.Length) bytes)"
+            Write-CRIT "ADS detected: $($ads.FileName) -> Stream: $($ads.Stream) ($($ads.Length) bytes)"
             $null = $findings.Add([PSCustomObject]@{
                 File = $ads.FileName; Type = "NTFS Alternate Data Stream"
                 Patterns = "Stream: $($ads.Stream)"; Modified = "N/A"
@@ -204,16 +188,16 @@ if ($findings | Where-Object { $_.Type -eq "NTFS Alternate Data Stream" }) {
     Write-OK "No ADS found in scanned locations"
 }
 
-# ── Save Report ───────────────────────────────────────────────────────────────
+# -- Save Report --------------------------------------------------------------
 if ($findings.Count -gt 0) {
     $findings | Export-Csv -Path $Report -NoTypeInformation
     Write-Host ""
     Write-CRIT "$($findings.Count) suspicious items found! Report: $Report"
     Write-Host ""
-    Write-Host "  For each CRIT finding — check file contents, quarantine if needed:" -ForegroundColor Yellow
-    Write-Host "  Quarantine:  Move-Item <file> C:\CCDC_Quarantine\" -ForegroundColor White
-    Write-Host "  Delete:      Remove-Item <file> -Force" -ForegroundColor White
-    Write-Host "  Contents:    Get-Content <file> | Select -First 30" -ForegroundColor White
+    Write-Host "  For each CRIT finding - check file contents, quarantine if needed:" -ForegroundColor Yellow
+    Write-Host "  Quarantine:  Move-Item [file] C:\CCDC_Quarantine\" -ForegroundColor White
+    Write-Host "  Delete:      Remove-Item [file] -Force" -ForegroundColor White
+    Write-Host "  Contents:    Get-Content [file] | Select-Object -First 30" -ForegroundColor White
 } else {
     Write-OK "No obvious malicious files found"
 }
