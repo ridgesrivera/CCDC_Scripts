@@ -193,7 +193,8 @@ foreach ($conn in $established) {
 
     $remoteStr = $conn.RemoteAddress.PadRight(25)
     $portStr   = $conn.RemotePort.ToString().PadRight(12)
-    $procStr   = (if ($proc) { $proc.Name } else { "PID:$($conn.OwningProcess)" }).PadRight(17)
+    $procName  = if ($proc) { $proc.Name } else { "PID:$($conn.OwningProcess)" }
+    $procStr   = $procName.PadRight(17)
     Write-Host "  $remoteStr $portStr $procStr $flag" -ForegroundColor $color
 }
 
