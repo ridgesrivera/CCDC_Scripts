@@ -75,33 +75,34 @@ function Send-ToastNotification {
 
     try {
         $icon = switch ($Severity) {
-            "CRITICAL" { "⛔" }
-            "HIGH"     { "🔴" }
-            "MEDIUM"   { "🟡" }
-            default    { "🔵" }
+            "CRITICAL" { "[!!]" }
+            "HIGH"     { "[HI]" }
+            "MEDIUM"   { "[MD]" }
+            default    { "[--]" }
         }
 
         [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
         [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]           | Out-Null
 
-        $xml = @"
-<toast>
-  <visual>
-    <binding template="ToastGeneric">
-      <text>$icon CCDC ALERT: $Title</text>
-      <text>$Body</text>
-      <text>$env:COMPUTERNAME | $(Get-Date -Format 'HH:mm:ss')</text>
-    </binding>
-  </visual>
-</toast>
-"@
+        $timestamp = Get-Date -Format 'HH:mm:ss'
+        $hostname  = $env:COMPUTERNAME
+        $line1     = "$icon CCDC ALERT: $Title"
+        $line2     = $Body
+        $line3     = "$hostname | $timestamp"
+
+        $xml = "<toast><visual><binding template=`"ToastGeneric`">" +
+               "<text>$line1</text>" +
+               "<text>$line2</text>" +
+               "<text>$line3</text>" +
+               "</binding></visual></toast>"
+
         $toastXml = New-Object Windows.Data.Xml.Dom.XmlDocument
         $toastXml.LoadXml($xml)
-        $toast = New-Object Windows.UI.Notifications.ToastNotification $toastXml
+        $toast    = New-Object Windows.UI.Notifications.ToastNotification $toastXml
         $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("CCDC Blue Team")
         $notifier.Show($toast)
     } catch {
-        # Toast failed - fallback to taskbar flash via msg.exe
+        # Toast failed - fallback to msg.exe popup
         try { msg * /TIME:10 "[$Severity] $Title - $Body" } catch {}
     }
 }
