@@ -14,12 +14,14 @@ param(
     [string]$LogDir         = "C:\BlueTeam\Monitor",
     [int]$BruteForceThresh  = 5,    # Failed logins in window to trigger alert
     [int]$BruteForceWindow  = 2,    # Minutes to count failed logins over
-    [switch]$AutoBlock              # Auto-block IPs that trigger CRITICAL alerts
+    [switch]$AutoBlock,             # Auto-block IPs that trigger CRITICAL alerts
+    [switch]$OneShot,               # Run one poll then exit (good for testing)
+    [switch]$TestMode               # Fire a fake alert to verify toasts/logging work
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # SETUP
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 $null = New-Item -ItemType Directory -Path $LogDir -Force -ErrorAction SilentlyContinue
 
 $LogFile        = "$LogDir\ThreatMonitor_$(Get-Date -Format 'yyyyMMdd').log"
@@ -46,9 +48,9 @@ $whitelistedIPs = @(
 # C2/suspicious ports to watch
 $c2Ports = @(4444, 5555, 6666, 7777, 8888, 1234, 9999, 31337, 1337, 4321, 2222, 6667, 6697)
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # LOGGING
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 function Write-Log {
     param([string]$Severity, [string]$Message, [string]$IP = "")
     $ts   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -67,9 +69,9 @@ function Write-Log {
     Write-Host $line -ForegroundColor $color
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # WINDOWS TOAST NOTIFICATIONS
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 function Send-ToastNotification {
     param([string]$Title, [string]$Body, [string]$Severity = "HIGH")
 
@@ -107,9 +109,9 @@ function Send-ToastNotification {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # IP TRACKER & BLOCKER
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 function Register-AttackerIP {
     param([string]$IP, [string]$Reason, [string]$Severity = "HIGH")
 
@@ -176,9 +178,9 @@ function Get-AttackerIPSummary {
         Write-Log -Severity "OK" -Message "No attacker IPs recorded yet"
         return
     }
-    Write-Host "`n  ╔══════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "  ║        ATTACKER IP SUMMARY               ║" -ForegroundColor Cyan
-    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "`n  ============================================" -ForegroundColor Cyan
+    Write-Host "       ATTACKER IP SUMMARY                  " -ForegroundColor Cyan
+    Write-Host "  ============================================" -ForegroundColor Cyan
     foreach ($entry in $ipTracker.GetEnumerator() | Sort-Object { $_.Value.Count } -Descending) {
         Write-Host "  $($entry.Key) | Hits: $($entry.Value.Count) | Last: $($entry.Value.LastSeen.ToString('HH:mm:ss'))" -ForegroundColor Yellow
         $entry.Value.Reasons | Select-Object -Unique | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
@@ -186,9 +188,9 @@ function Get-AttackerIPSummary {
     Write-Host ""
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # EVENT ANALYZERS
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 function Watch-SecurityEvents {
     try {
         $events = Get-WinEvent -FilterHashtable @{
@@ -207,7 +209,7 @@ function Watch-SecurityEvents {
             switch ($evt.Id) {
 
                 1102 {  # Log cleared
-                    Write-Log -Severity "CRITICAL" -Message "⚠ AUDIT LOG CLEARED - Attacker covering tracks!"
+                    Write-Log -Severity "CRITICAL" -Message "[!] AUDIT LOG CLEARED - Attacker covering tracks!"
                     Send-ToastNotification -Title "AUDIT LOG CLEARED" -Body "An attacker may be covering their tracks!" -Severity "CRITICAL"
                     Save-Evidence "LogCleared" $msg
                 }
@@ -356,15 +358,230 @@ function Watch-SuspiciousProcesses {
 
 function Watch-WMISubscriptions {
     try {
-        $filters   = Get-WMIObject -Namespace root\subscription -Class __EventFilter   -ErrorAction SilentlyContinue
-        $consumers = Get-WMIObject -Namespace root\subscription -Class __EventConsumer -ErrorAction SilentlyContinue
+        # Known-legit WMI subscriptions - built-in Windows components
+        $legitWMIFilters = @(
+            'SCM Event Log Filter',          # Service Control Manager - built-in Windows
+            'BVTFilter',                     # Windows built-in
+            'TSlogonFilter',                 # Terminal Services
+            'RAeventFilter'                  # Remote Assistance
+        )
 
-        $key = "WMI-$(($filters.Count) + ($consumers.Count))"
-        if (($filters -or $consumers) -and -not $seen.Contains($key)) {
+        $filters   = @(Get-WMIObject -Namespace root\subscription -Class __EventFilter   -ErrorAction SilentlyContinue)
+        $consumers = @(Get-WMIObject -Namespace root\subscription -Class __EventConsumer -ErrorAction SilentlyContinue)
+
+        # Filter out known-legit entries
+        $suspFilters   = $filters   | Where-Object { $_.Name -notin $legitWMIFilters }
+        $suspConsumers = $consumers | Where-Object { $_.Name -notin @('SCM Event Log Consumer', 'BVTConsumer', 'TSlogonConsumer', 'RaActiveConsumer') }
+
+        $fCount = $suspFilters.Count
+        $cCount = $suspConsumers.Count
+
+        $key = "WMI-$fCount-$cCount"
+        if (($fCount -gt 0 -or $cCount -gt 0) -and -not $seen.Contains($key)) {
             $seen.Add($key) | Out-Null
-            Write-Log -Severity "CRITICAL" -Message "WMI PERSISTENCE SUBSCRIPTIONS DETECTED! Filters: $($filters.Count) Consumers: $($consumers.Count)"
+            $fNames = ($suspFilters   | ForEach-Object { $_.Name }) -join ', '
+            $cNames = ($suspConsumers | ForEach-Object { $_.Name }) -join ', '
+            Write-Log -Severity "CRITICAL" -Message "WMI PERSISTENCE DETECTED! Filters: $fCount ($fNames) Consumers: $cCount ($cNames)" 
             Send-ToastNotification -Title "WMI Persistence Detected!" -Body "Red team may have installed WMI event subscriptions" -Severity "CRITICAL"
             Save-Evidence "WMI_Subscriptions" ($filters | Out-String) + ($consumers | Out-String)
+        }
+    } catch {}
+}
+
+# -----------------------------------------------------------------------------
+# COMPETITION HOURS PERSISTENCE SCANNER
+# Looks for scheduled tasks, AT jobs, and other timed mechanisms that are
+# set to fire during competition hours (default 9am-5pm).
+# Red team loves planting tasks that detonate mid-competition.
+# -----------------------------------------------------------------------------
+function Watch-CompTimedPersistence {
+    param(
+        [int]$CompStartHour = 9,   # Change to match your competition window
+        [int]$CompEndHour   = 17
+    )
+
+    # -- 1. SCHEDULED TASKS WITH TRIGGERS IN COMP WINDOW ----------------------
+    try {
+        $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue
+
+        # Legit task paths - skip anything under these vendor folders
+        $legitPaths = @(
+            '\Microsoft\',
+            '\Adobe\',
+            '\Google\',
+            '\MicrosoftEdgeUpdate\'
+        )
+        # Legit executables - skip tasks whose action is one of these binaries
+        $legitExecutables = @(
+            'MicrosoftEdgeUpdate.exe',
+            'MicrosoftEdge.exe',
+            'OneDriveStandaloneUpdater.exe',
+            'GoogleUpdate.exe',
+            'AdobeARM.exe',
+            'SgrmBroker.exe',
+            'MpCmdRun.exe'
+        )
+
+        foreach ($task in $tasks) {
+            # Skip if task path is under a known-legit vendor folder
+            $isLegitPath = $legitPaths | Where-Object { $task.TaskPath -like "*$_*" }
+            if ($isLegitPath) { continue }
+
+            # Skip if the action binary is a known-legit executable
+            $taskExe = ($task.Actions | Select-Object -First 1).Execute
+            $isLegitExe = $legitExecutables | Where-Object { $taskExe -like "*$_*" }
+            if ($isLegitExe) { continue }
+
+            foreach ($trigger in $task.Triggers) {
+                $flagged   = $false
+                $reason    = ""
+                $severity  = "MEDIUM"
+
+                # Time-based trigger - does it fire during comp hours?
+                if ($trigger.CimClass.CimClassName -eq 'MSFT_TaskTimeTrigger' -or
+                    $trigger.CimClass.CimClassName -eq 'MSFT_TaskDailyTrigger' -or
+                    $trigger.CimClass.CimClassName -eq 'MSFT_TaskWeeklyTrigger') {
+
+                    $startBoundary = $trigger.StartBoundary
+                    if ($startBoundary) {
+                        try {
+                            $triggerTime = [datetime]::Parse($startBoundary)
+                            $hour = $triggerTime.Hour
+                            if ($hour -ge $CompStartHour -and $hour -le $CompEndHour) {
+                                $flagged  = $true
+                                $severity = "HIGH"
+                                $windowStr = "$CompStartHour" + ":00-" + "$CompEndHour" + ":00"
+                                $reason   = "Timed trigger firing at " + $triggerTime.ToString("HH:mm") + " (inside comp window $windowStr)"
+                            }
+                        } catch {}
+                    }
+                }
+
+                # Logon trigger - fires when any user logs in
+                if ($trigger.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger') {
+                    $flagged  = $true
+                    $severity = "HIGH"
+                    $reason   = "Logon trigger - fires on ANY user login"
+                }
+
+                # Boot/startup trigger
+                if ($trigger.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger') {
+                    $flagged  = $true
+                    $severity = "MEDIUM"
+                    $reason   = "Boot trigger - fires on system startup"
+                }
+
+                # Event-based trigger (can hook arbitrary system events)
+                if ($trigger.CimClass.CimClassName -eq 'MSFT_TaskEventTrigger') {
+                    $flagged  = $true
+                    $severity = "HIGH"
+                    $reason   = "Event-based trigger: $($trigger.Subscription)"
+                }
+
+                if ($flagged) {
+                    $actions  = $task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }
+                    $actionStr = $actions -join " | "
+
+                    # Bump severity if the action itself looks suspicious
+                    if ($actionStr -match '(powershell|cmd|wscript|cscript|mshta|rundll32|certutil|bitsadmin|\.ps1|\.vbs|\.bat|-enc|bypass|http)') {
+                        $severity = "CRITICAL"
+                    }
+
+                    $key = "COMPTASK-$($task.TaskPath)$($task.TaskName)-$($trigger.CimClass.CimClassName)"
+                    if (-not $seen.Contains($key)) {
+                        $seen.Add($key) | Out-Null
+
+                        Write-Log -Severity $severity `
+                            -Message "COMP-WINDOW TASK: $($task.TaskPath)$($task.TaskName)" 
+                        Write-Log -Severity $severity `
+                            -Message "  Reason : $reason"
+                        Write-Log -Severity $severity `
+                            -Message "  Action : $actionStr"
+                        Write-Log -Severity $severity `
+                            -Message "  User   : $($task.Principal.UserId) | RunLevel: $($task.Principal.RunLevel)"
+
+                        Send-ToastNotification `
+                            -Title "Suspicious Scheduled Task!" `
+                            -Body "$($task.TaskName) | $reason" `
+                            -Severity $severity
+
+                        Save-Evidence "CompTask_$($task.TaskName)" (
+                            "Task     : $($task.TaskPath)$($task.TaskName)`n" +
+                            "Reason   : $reason`n" +
+                            "Action   : $actionStr`n" +
+                            "User     : $($task.Principal.UserId)`n" +
+                            "RunLevel : $($task.Principal.RunLevel)`n" +
+                            "State    : $($task.State)`n" +
+                            "Trigger  : $($trigger.CimClass.CimClassName)`n" +
+                            "RawXML   : $(Export-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue)"
+                        )
+                    }
+                }
+            }
+        }
+    } catch {}
+
+    # -- 2. LEGACY AT JOBS (schtasks /create with AT syntax) ------------------
+    try {
+        $atRaw = schtasks /query /fo CSV /v 2>$null | ConvertFrom-Csv -ErrorAction SilentlyContinue
+        $atJobs = $atRaw | Where-Object {
+            $_.'Task Name' -and
+            $_.'Task To Run' -and
+            ($_.'Task Name' -match '^\\At\d+' -or $_.'Task To Run' -match '(powershell|cmd|wscript|mshta|\.ps1|\.vbs|\.bat|-enc)')
+        }
+
+        foreach ($job in $atJobs) {
+            $key = "ATJOB-$($_.'Task Name')"
+            if (-not $seen.Contains($key)) {
+                $seen.Add($key) | Out-Null
+                Write-Log -Severity "HIGH" -Message "LEGACY AT JOB FOUND: $($_.'Task Name')" 
+                Write-Log -Severity "HIGH" -Message "  Run  : $($_.'Task To Run')"
+                Write-Log -Severity "HIGH" -Message "  Time : $($_.'Next Run Time')"
+                Send-ToastNotification -Title "Legacy AT Job Found" -Body "$($_.'Task Name') runs: $($_.'Task To Run')" -Severity "HIGH"
+                Save-Evidence "ATJob_$($_.'Task Name' -replace '\\','')" ($job | Out-String)
+            }
+        }
+    } catch {}
+
+    # -- 3. REGISTRY RUN ONCE KEYS (fire exactly once, then delete themselves) -
+    try {
+        $runOnceKeys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+            'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
+        )
+        foreach ($key in $runOnceKeys) {
+            if (Test-Path $key) {
+                $props = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+                $props.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
+                    $dkey = "RUNONCE-$key-$($_.Name)"
+                    if (-not $seen.Contains($dkey)) {
+                        $seen.Add($dkey) | Out-Null
+                        Write-Log -Severity "HIGH" -Message "RUNONCE KEY FOUND: $($_.Name) = $($_.Value)"
+                        Send-ToastNotification -Title "RunOnce Key Detected" -Body "$($_.Name): $($_.Value)" -Severity "HIGH"
+                        Save-Evidence "RunOnce_$($_.Name)" "$key\$($_.Name) = $($_.Value)"
+                    }
+                }
+            }
+        }
+    } catch {}
+
+    # -- 4. TASKS CREATED/MODIFIED IN LAST POLL WINDOW ------------------------
+    try {
+        $taskFolder = "C:\Windows\System32\Tasks"
+        $cutoff     = (Get-Date).AddSeconds(-($PollSeconds * 2))
+        $newTasks   = Get-ChildItem -Path $taskFolder -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt $cutoff }
+
+        foreach ($t in $newTasks) {
+            $key = "NEWTASKFILE-$($t.FullName)-$($t.LastWriteTime)"
+            if (-not $seen.Contains($key)) {
+                $seen.Add($key) | Out-Null
+                Write-Log -Severity "HIGH" -Message "TASK FILE JUST WRITTEN: $($t.FullName)"
+                Write-Log -Severity "HIGH" -Message "  Modified: $($t.LastWriteTime)"
+                Send-ToastNotification -Title "Task File Modified!" -Body "New/modified task file: $($t.Name)" -Severity "HIGH"
+                Save-Evidence "NewTaskFile_$($t.Name)" (Get-Content $t.FullName -Raw -ErrorAction SilentlyContinue)
+            }
         }
     } catch {}
 }
@@ -375,26 +592,49 @@ function Save-Evidence {
     $Data | Out-File -FilePath $path -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # MAIN LOOP
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 Clear-Host
 Write-Host @"
 
-  ╔════════════════════════════════════════════════════════════╗
-  ║        CCDC BLUE TEAM - BACKGROUND THREAT MONITOR         ║
-  ║                                                            ║
-  ║  Logs    : $LogFile
-  ║  IPs     : $IPFile
-  ║  Evidence: $EvidenceDir
-  ║  AutoBlock: $AutoBlock                                     
-  ╚════════════════════════════════════════════════════════════╝
+  +============================================================+
+  |        CCDC BLUE TEAM - BACKGROUND THREAT MONITOR         |
+  |                                                            |
+  |  Logs    : $LogFile
+  |  IPs     : $IPFile
+  |  Evidence: $EvidenceDir
+  |  AutoBlock: $AutoBlock                                     
+  +============================================================+
 
   Watching every ${PollSeconds}s | Press CTRL+C to stop | Type 'ips' for IP summary
 
 "@ -ForegroundColor Cyan
 
 Write-Log -Severity "OK" -Message "Monitor started on $env:COMPUTERNAME by $env:USERNAME"
+
+# -TestMode: inject a fake alert for each severity to verify toasts and logging
+if ($TestMode) {
+    Write-Log -Severity "OK" -Message "TEST MODE - firing synthetic alerts..."
+    Send-ToastNotification -Title "Test CRITICAL" -Body "This is a test critical alert" -Severity "CRITICAL"
+    Write-Log -Severity "CRITICAL" -Message "SYNTHETIC TEST: CRITICAL alert fired"
+    Start-Sleep -Seconds 2
+
+    Send-ToastNotification -Title "Test HIGH" -Body "This is a test high alert" -Severity "HIGH"
+    Write-Log -Severity "HIGH" -Message "SYNTHETIC TEST: HIGH alert fired"
+    Start-Sleep -Seconds 2
+
+    Send-ToastNotification -Title "Test MEDIUM" -Body "This is a test medium alert" -Severity "MEDIUM"
+    Write-Log -Severity "MEDIUM" -Message "SYNTHETIC TEST: MEDIUM alert fired"
+    Start-Sleep -Seconds 2
+
+    # Fake attacker IP registration
+    Register-AttackerIP -IP "10.99.99.99" -Reason "Synthetic test IP" -Severity "HIGH"
+
+    Write-Log -Severity "OK" -Message "TEST MODE complete - check for 3 toast popups and entries in $LogFile"
+    Get-AttackerIPSummary
+    exit
+}
 
 # Register CTRL+C handler to print IP summary on exit
 [Console]::TreatControlCAsInput = $false
@@ -404,11 +644,12 @@ $null = Register-EngineEvent -SourceIdentifier ([System.Management.Automation.Ps
 }
 
 $ticker = 0
-while ($true) {
+do {
     Watch-SecurityEvents
     Watch-NetworkConnections
     Watch-BruteForce
     Watch-SuspiciousProcesses
+    Watch-CompTimedPersistence   # Scans tasks/RunOnce/AT jobs every poll
 
     # WMI check is slower - only every 5 polls
     if ($ticker % 5 -eq 0) { Watch-WMISubscriptions }
@@ -417,5 +658,6 @@ while ($true) {
     if ($ticker % 10 -eq 0 -and $ticker -gt 0) { Get-AttackerIPSummary }
 
     $ticker++
-    Start-Sleep -Seconds $PollSeconds
-}
+    if (-not $OneShot) { Start-Sleep -Seconds $PollSeconds }
+
+} while (-not $OneShot)
