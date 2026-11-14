@@ -25,6 +25,7 @@ Stopgap: `tools\Get-CcdcTools.ps1 -IncludeLinux` stages pspy + Lynis to copy ove
 | `audit\Audit-Network` | Essential | Live connections → process, any/any firewall rules, SMB/RDP/WinRM exposure |
 | `audit\Audit-Vulns` | Essential | **Expanded:** SMBGhost (matters on fossil if it's 1903/1909), NTLMv1/LM, anonymous enumeration, Guest, AD CS ESC1 with enrollment-rights check |
 | `audit\Audit-AD-GPO` | Essential (trex) | **Fixed:** "all extended rights" ACEs (DCSync-capable) were not flagged; gPLink parsing now case-insensitive |
+| `audit\Audit-SecurityPolicy` | Essential | **New.** GPO/AD/DNS settings with SAFE / CAUTION / LEAVE, GPO path and check/fix commands; `-Reference` regenerates `docs/security-policy-reference.md` |
 | `audit\Invoke-AuditTools` | Useful | **New.** Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith (winPEAS opt-in) → findings |
 | `harden\Rotate-Passwords` | Essential | **Fixed (serious):** if clearing "must change at next logon" failed *after* the password was set, the new password was never shown, so you were locked out of that account. Now it's always shown, and the follow-up step is best-effort |
 | `harden\Disable-Accounts` | Essential | Fine as is |

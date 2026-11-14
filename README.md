@@ -13,8 +13,9 @@ Every script is meant to be read: each one opens with a header saying **what it'
      READ-ONLY (safe any time)
      [1]  Box overview        [2] Users & admins   [3] Persistence hunt
      [4]  Network exposure    [5] Vuln check       [6] AD + GPO (DC only)
+     [P]  Security policy     GPO/AD/DNS settings safe to turn on + where to set them
      [T]  Vendor tool audits  (Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith)
-     [A]  Run ALL read-only audits  -> C:\ccdc\reports\
+     [A]  Run ALL read-only audits (1-6 + P)  -> C:\ccdc\reports\
      CHANGES THE BOX (dry run offered first)
      [7]  Rotate passwords    [8] Disable accounts [9] Firewall allowlist
      [10] Baseline hardening  [11] IIS / PHP hardening
@@ -68,6 +69,7 @@ legacy/                     v1 scripts, unchanged
 | `audit\Audit-Persistence.ps1` | Read-only | Tasks, services, Run keys, startup, WMI, Winlogon, IFEO/sticky keys, AppInit, SSH keys/config, Defender exclusions, System32 changes, web shells, LSA packages, netsh helpers, hidden tasks, ServiceDll hijacks, PS profiles |
 | `audit\Audit-Network.ps1` | Read-only | Connections + process, firewall profiles, any/any rules, SMBv1, SMB signing, shares + ACLs, RDP NLA, WinRM |
 | `audit\Audit-Vulns.ps1` | Read-only | Zerologon, PrintNightmare, MS17-010, NoPAC, SMBGhost, LLMNR/NBT-NS, NTLMv1, anonymous/Guest, WDigest, LSA protection, LAPS, AD CS ESC1, Defender |
+| `audit\Audit-SecurityPolicy.ps1` | Read-only | ~55 GPO / AD / DNS security settings (reversible-encryption passwords, WDigest, LM hashes, anonymous access, NTLM, SMB/LDAP signing, zone transfers, insecure DNS updates...): current value, SAFE / CAUTION / LEAVE, the GPO path to set it, and check + fix commands. Reference table: [`docs/security-policy-reference.md`](docs/security-policy-reference.md) |
 | `audit\Invoke-AuditTools.ps1` | Read-only | Runs the staged vendor tools (Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith; winPEAS opt-in) and turns their output into findings |
 | `audit\Audit-AD-GPO.ps1` | Read-only (DC) | GPOs + recent changes, SYSVOL changes, GPP cpassword, root ACL, DCSync holders, AdminSDHolder, delegation, krbtgt age |
 | `harden\Rotate-Passwords.ps1` | **Changes** | Random passwords for local/domain users, exclude list, shown once, never saved |
