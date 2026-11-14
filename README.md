@@ -13,15 +13,19 @@ Every script is meant to be read: each one opens with a header saying **what it'
      READ-ONLY (safe any time)
      [1]  Box overview        [2] Users & admins   [3] Persistence hunt
      [4]  Network exposure    [5] Vuln check       [6] AD + GPO (DC only)
+     [T]  Vendor tool audits  (Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith)
      [A]  Run ALL read-only audits  -> C:\ccdc\reports\
      CHANGES THE BOX (dry run offered first)
      [7]  Rotate passwords    [8] Disable accounts [9] Firewall allowlist
      [10] Baseline hardening  [11] IIS / PHP hardening
      BACKUP / LOGGING / HUNT
-     [B]  Backup   [L] Setup logging   [W] Watch for changes
+     [B]  Backup   [S] Per-service backup   [L] Setup logging   [W] Watch for changes
      [H]  Explain a script    [Q] Quit
    ```
 3. Follow [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windows.md).
+
+**Before the event:** stage the third-party tools once on a trusted machine with `tools\Get-CcdcTools.ps1`
+(Sysinternals, Sysmon, PingCastle, Locksmith, Hayabusa). On a box, run `tools\Get-CcdcTools.ps1 -Verify` before you use them. See [`tools/README.md`](tools/README.md).
 
 Scripts can also be run directly, e.g. `.\windows\audit\Audit-Users.ps1 -OutFile C:\ccdc\reports\users.csv`.
 `Get-Help <script> -Full` shows the header.
@@ -41,8 +45,8 @@ windows/
   backup/  logging/  hunt/
   services/                 one script per service (AD, DNS, IIS, SQL, SMB, RDP...): info, backup, restore
 config/                     example config (no secrets)
-docs/                       first-15-minutes, per-box pages, incident response, teaching guide
-tools/                      how to stage Sysmon/Winlogbeat offline (+ lint scripts)
+docs/                       first-15-minutes, per-box pages, incident response, teaching guide, toolkit-review
+tools/                      Get-CcdcTools.ps1: download + hash-verify third-party tools (+ lint scripts)
 legacy/                     v1 scripts, unchanged
 ```
 
@@ -61,16 +65,17 @@ legacy/                     v1 scripts, unchanged
 |--------|---------------------|--------------|
 | `recon\Get-BoxOverview.ps1` | Read-only | Hostname, OS/build, domain role, IPs, listeners → process, roles, services, hotfixes, likely scored services |
 | `audit\Audit-Users.ps1` | Read-only | Local/domain users, privileged groups (DA/EA/Schema/DnsAdmins/Backup Ops/RDP), pw-never-expires, new accounts, SPNs, AS-REP roastable, passwords in descriptions, adminCount |
-| `audit\Audit-Persistence.ps1` | Read-only | Tasks, services, Run keys, startup, WMI, Winlogon, IFEO/sticky keys, AppInit, SSH keys/config, Defender exclusions, System32 changes, web shells |
+| `audit\Audit-Persistence.ps1` | Read-only | Tasks, services, Run keys, startup, WMI, Winlogon, IFEO/sticky keys, AppInit, SSH keys/config, Defender exclusions, System32 changes, web shells, LSA packages, netsh helpers, hidden tasks, ServiceDll hijacks, PS profiles |
 | `audit\Audit-Network.ps1` | Read-only | Connections + process, firewall profiles, any/any rules, SMBv1, SMB signing, shares + ACLs, RDP NLA, WinRM |
-| `audit\Audit-Vulns.ps1` | Read-only | Zerologon, PrintNightmare, MS17-010, NoPAC, LLMNR/NBT-NS, WDigest, LSA protection, LAPS, Defender |
+| `audit\Audit-Vulns.ps1` | Read-only | Zerologon, PrintNightmare, MS17-010, NoPAC, SMBGhost, LLMNR/NBT-NS, NTLMv1, anonymous/Guest, WDigest, LSA protection, LAPS, AD CS ESC1, Defender |
+| `audit\Invoke-AuditTools.ps1` | Read-only | Runs the staged vendor tools (Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith; winPEAS opt-in) and turns their output into findings |
 | `audit\Audit-AD-GPO.ps1` | Read-only (DC) | GPOs + recent changes, SYSVOL changes, GPP cpassword, root ACL, DCSync holders, AdminSDHolder, delegation, krbtgt age |
 | `harden\Rotate-Passwords.ps1` | **Changes** | Random passwords for local/domain users, exclude list, shown once, never saved |
 | `harden\Disable-Accounts.ps1` | **Changes** | Disable (not delete) accounts, rollback script |
-| `harden\Set-Firewall.ps1` | **Changes** | All profiles on, default-deny inbound, allowlist, keeps your session, auto-rollback task |
-| `harden\Harden-Baseline.ps1` | **Changes** | SMBv1, SMB signing, LLMNR/NBT-NS, WDigest, LSA protection, spooler on DC, audit policy, script block logging, Defender, IFEO removal (each skippable) |
+| `harden\Set-Firewall.ps1` | **Changes** | All profiles on, default-deny inbound, allowlist (scored ports open to any source), keeps your session, auto-rollback task |
+| `harden\Harden-Baseline.ps1` | **Changes** | SMBv1, SMB signing, LLMNR/NBT-NS, WDigest, LSA protection, spooler on DC, audit policy, script block logging, Defender, IFEO removal, RDP NLA, Guest off, MachineAccountQuota=0 (each skippable) |
 | `harden\Harden-IIS-PHP.ps1` | **Changes** (wp-config only) | Backup IIS/web roots, WP DISALLOW_FILE_EDIT, config ACL checks, WP admins/plugins, MediaWiki/php.ini checks |
-| `backup\Backup-Box.ps1` | Writes backup folder only | Registry, tasks, firewall, users; DC: IFM, GPOs, DNS, LDIF; IIS config + web roots |
+| `backup\Backup-Box.ps1` | Writes backup folder only | Registry, tasks, firewall, users; DC: GPOs, DNS, LDIF (ntds.dit IFM only with `-IncludeAdIfm`); IIS config + web roots |
 | `logging\Setup-Logging.ps1` | **Changes** | Audit policy, log sizes, PowerShell logging, Sysmon (if staged), Winlogbeat/NXLog → Graylog |
 | `hunt\Watch-Changes.ps1` | Read-only (writes snapshots) | Baseline users/groups/tasks/services/ports/Run keys/WMI/shares, then diff every N minutes |
 

@@ -21,4 +21,4 @@ DNS (53), LDAP (389/636), Kerberos (88), SMB (445), maybe RDP (3389). Confirm ag
 5. AS-REP/Kerberoastable accounts → `[2]` flags them.
 
 ## First moves
-`[1]` → `[7]` (Domain Admins) → `[2]` → `[B]` (IFM + GPO + DNS) → `[6]` → `[3]` → `[9]` → `[10]`.
+`[1]` → `[7]` (Domain Admins) → `[2]` → `[B]` (GPO + DNS + LDIF; add `-IncludeAdIfm` only if you need ntds.dit) → `[6]` → `[3]` → `[9]` → `[10]`.

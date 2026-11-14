@@ -20,6 +20,9 @@
       EnableScriptBlockLogging PowerShell 4104 events + command line in 4688
       EnableDefenderRealtime  Defender real-time protection on
       RemoveIfeoDebuggers     delete IFEO "Debugger" values        (sticky-keys backdoors) - asks per entry
+      RequireRdpNla           RDP UserAuthentication=1 (NLA)       (pre-auth RDP bugs, sticky keys at login screen)
+      DisableGuest            disable the built-in Guest account   (local, or domain Guest on a DC)
+      MachineAccountQuotaZero DC: ms-DS-MachineAccountQuota=0      (NoPAC / RBCD need a user-created computer)
 
     WHAT IT READS    registry, services, SMB config, auditpol, Defender
     WHAT IT CHANGES  only the settings above
@@ -54,7 +57,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [ValidateSet('DisableSMBv1', 'RequireSMBSigning', 'DisableLLMNR', 'DisableNBTNS', 'DisableWDigest', 'EnableLSAProtection',
-                 'DisableSpoolerOnDC', 'EnableAuditPolicy', 'EnableScriptBlockLogging', 'EnableDefenderRealtime', 'RemoveIfeoDebuggers')]
+                 'DisableSpoolerOnDC', 'EnableAuditPolicy', 'EnableScriptBlockLogging', 'EnableDefenderRealtime', 'RemoveIfeoDebuggers',
+                 'RequireRdpNla', 'DisableGuest', 'MachineAccountQuotaZero')]
     [string[]]$Only = @(),
     [string[]]$Skip = @(),
     [switch]$Force,
@@ -204,6 +208,64 @@ if (Test-Run 'RemoveIfeoDebuggers') {
         }
     }
     if (-not $found) { Write-Finding -Level GREEN -Category 'RemoveIfeoDebuggers' -Message 'No IFEO debuggers present' }
+}
+
+if (Test-Run 'RequireRdpNla') {
+    # NLA = the user must authenticate BEFORE the RDP login screen appears. Stops
+    # pre-auth exploits and makes sticky-keys / utilman backdoors unreachable.
+    # Every current RDP client (mstsc, xfreerdp, Remmina) supports it.
+    $ts = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -ErrorAction SilentlyContinue
+    if ($ts -and $ts.fDenyTSConnections -eq 0) {
+        Set-CcdcRegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' 'UserAuthentication' 1 'RequireRdpNla'
+        Write-Finding -Level INFO -Category 'RequireRdpNla' -Message 'Applies to NEW RDP connections. Test a fresh login (and the scoreboard) right after.'
+    } else { Write-Finding -Level INFO -Category 'RequireRdpNla' -Message 'RDP is disabled on this box - nothing to do.' }
+}
+
+if (Test-Run 'DisableGuest') {
+    $guest = Get-WmiObject Win32_UserAccount -Filter "LocalAccount=True AND SID LIKE '%-501'" -ErrorAction SilentlyContinue
+    if ($isDC) {
+        # The domain Guest is always <domain SID>-501; bind to it directly by SID.
+        $domRoot = [ADSI]('LDAP://' + ([ADSI]'LDAP://RootDSE').defaultNamingContext)
+        $domSid  = (New-Object System.Security.Principal.SecurityIdentifier($domRoot.Properties['objectSid'][0], 0)).Value
+        $guestDe = $null
+        try { $guestDe = [ADSI]"LDAP://<SID=$domSid-501>"; $null = $guestDe.Properties['sAMAccountName'].Value } catch { $guestDe = $null }
+        if ($guestDe -and $guestDe.Properties['sAMAccountName'].Value) {
+            $uacNow = [int]$guestDe.Properties['userAccountControl'].Value
+            if ($uacNow -band 2) { Write-Finding -Level GREEN -Category 'DisableGuest' -Message 'Domain Guest already disabled' }
+            else {
+                [void](Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target "Domain\$($guestDe.Properties['sAMAccountName'].Value)" -Action 'Disable built-in Guest' -Undo "Enable-ADAccount -Identity $($guestDe.Properties['sAMAccountName'].Value)" -ScriptBlock {
+                    $guestDe.Properties['userAccountControl'].Value = $uacNow -bor 2
+                    $guestDe.CommitChanges()
+                })
+            }
+        }
+    } elseif ($guest) {
+        if ($guest.Disabled) { Write-Finding -Level GREEN -Category 'DisableGuest' -Message "Guest ($($guest.Name)) already disabled" }
+        else {
+            $gName = $guest.Name
+            [void](Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target "Local\$gName" -Action 'Disable built-in Guest' -Undo "net user `"$gName`" /active:yes" -ScriptBlock {
+                $null = & net.exe user $gName /active:no 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "net user exit $LASTEXITCODE" }
+            })
+        }
+    }
+}
+
+if (Test-Run 'MachineAccountQuotaZero') {
+    # ms-DS-MachineAccountQuota (default 10) lets ANY domain user create computer
+    # accounts - the first step of NoPAC and RBCD attacks. Admins can still join machines.
+    if (-not $isDC) { Write-Finding -Level INFO -Category 'MachineAccountQuotaZero' -Message 'Not a DC - n/a' }
+    else {
+        $root = [ADSI]('LDAP://' + ([ADSI]'LDAP://RootDSE').defaultNamingContext)
+        $maq = [int]$root.Properties['ms-DS-MachineAccountQuota'].Value
+        if ($maq -eq 0) { Write-Finding -Level GREEN -Category 'MachineAccountQuotaZero' -Message 'ms-DS-MachineAccountQuota already 0' }
+        else {
+            [void](Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'domain root' -Action "Set ms-DS-MachineAccountQuota 0 (was $maq)" -Undo "Set-ADDomain -Identity (Get-ADDomain) -Replace @{'ms-DS-MachineAccountQuota'=$maq}" -ScriptBlock {
+                $root.Properties['ms-DS-MachineAccountQuota'].Value = 0
+                $root.CommitChanges()
+            })
+        }
+    }
 }
 
 Complete-Ccdc

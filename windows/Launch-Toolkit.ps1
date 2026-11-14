@@ -34,6 +34,7 @@ $menu = @(
     @{ Key = '4';  Name = 'Network exposure';        File = 'audit\Audit-Network.ps1';       RO = $true;  Desc = 'Connections, firewall, SMBv1/signing, shares, RDP NLA, WinRM' }
     @{ Key = '5';  Name = 'Vulnerability check';     File = 'audit\Audit-Vulns.ps1';         RO = $true;  Desc = 'Zerologon, PrintNightmare, MS17-010, NoPAC, LLMNR, WDigest, LSA, Defender' }
     @{ Key = '6';  Name = 'AD + GPO (DC only)';      File = 'audit\Audit-AD-GPO.ps1';        RO = $true;  Desc = 'GPO changes, DCSync rights, root ACL, delegation, krbtgt age' }
+    @{ Key = 'T';  Name = 'Vendor tool audits';      File = 'audit\Invoke-AuditTools.ps1';  RO = $true;  Desc = 'Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith' }
     @{ Key = '7';  Name = 'Rotate passwords';        File = 'harden\Rotate-Passwords.ps1';   RO = $false; Desc = 'Random passwords, shown once, never saved. Scored accounts excluded' }
     @{ Key = '8';  Name = 'Disable accounts';        File = 'harden\Disable-Accounts.ps1';   RO = $false; Desc = 'Disable (not delete) rogue accounts, with rollback file' }
     @{ Key = '9';  Name = 'Firewall allowlist';      File = 'harden\Set-Firewall.ps1';       RO = $false; Desc = 'Default-deny inbound, allow scored ports, keep your session, auto-rollback' }
@@ -92,6 +93,9 @@ function Get-ScriptParams([string]$key) {
             if ($adm) { $p.AdminSources = $adm }
             if (Read-YesNo 'ALSO disable all other inbound allow rules (true allowlist)?' $false) { $p.DisableOtherInboundRules = $true }
         }
+        'T' {
+            if (Read-YesNo 'Also run winPEAS? (Defender may quarantine it; output can contain credentials)' $false) { $p.IncludeWinPEAS = $true }
+        }
         '10' {
             $skip = Read-List 'Modules to SKIP (Enter = none; e.g. EnableLSAProtection,RequireSMBSigning)'
             if ($skip) { $p.Skip = $skip }
@@ -117,7 +121,7 @@ function Show-Menu {
     Write-Host '   Logs: C:\ccdc\logs   Reports: C:\ccdc\reports   Backups: C:\ccdc\backups' -ForegroundColor DarkGray
     Write-Host ""
     Write-Host '  READ-ONLY (safe any time)' -ForegroundColor Green
-    foreach ($m in $menu | Where-Object { $_.Key -in '1', '2', '3', '4', '5', '6' }) { Write-MenuLine $m 'White' }
+    foreach ($m in $menu | Where-Object { $_.Key -in '1', '2', '3', '4', '5', '6', 'T' }) { Write-MenuLine $m 'White' }
     Write-Host '  [A]  ' -NoNewline -ForegroundColor Yellow; Write-Host 'Run ALL read-only audits' -NoNewline -ForegroundColor Cyan; Write-Host '  - 1-6, reports saved to C:\ccdc\reports\' -ForegroundColor DarkGray
     Write-Host ""
     Write-Host '  CHANGES THE BOX (dry run offered first)' -ForegroundColor Yellow
@@ -178,7 +182,7 @@ while ($true) {
     $choice = (Read-Host 'Select option').Trim().ToUpper()
     if ($choice -eq 'Q') { break }
     if ($choice -eq 'H') {
-        $k = (Read-Host '  Which option? (1-11, B, S, L, W)').Trim().ToUpper()
+        $k = (Read-Host '  Which option? (1-11, T, B, S, L, W)').Trim().ToUpper()
         $m = $menu | Where-Object { $_.Key -eq $k }
         if ($m) { Get-Help (Join-Path $here $m.File) -Full | Out-Host -Paging }
     } elseif ($choice -eq 'A') {

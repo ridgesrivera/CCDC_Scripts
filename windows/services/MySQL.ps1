@@ -55,10 +55,13 @@ function Find-MySql {
     $res
 }
 
+# The password goes in the MYSQL_PWD environment variable of THIS process
+# (inherited by mysql.exe / mysqldump.exe), never on the command line: command
+# lines show up in process lists and in 4688 / Sysmon 1 events.
+# It is removed again at the end of this script.
+if ($DbPassword) { $env:MYSQL_PWD = $DbPassword }
 function Get-MyArgs { param($Inst)
-    $a = @("--user=$DbUser", '--host=127.0.0.1', "--port=$(if ($DbPort) { $DbPort } else { $Inst.Port })")
-    if ($DbPassword) { $a += "--password=$DbPassword" }
-    $a
+    @("--user=$DbUser", '--host=127.0.0.1', "--port=$(if ($DbPort) { $DbPort } else { $Inst.Port })")
 }
 
 $Def = @{
@@ -155,4 +158,8 @@ $Def.Restore = {
     }
 }
 
-Invoke-ServiceMain -Def $Def -Action $Action -RestoreFrom $RestoreFrom -BackupRoot $BackupRoot -Force:$Force
+try {
+    Invoke-ServiceMain -Def $Def -Action $Action -RestoreFrom $RestoreFrom -BackupRoot $BackupRoot -Force:$Force
+} finally {
+    Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue
+}
