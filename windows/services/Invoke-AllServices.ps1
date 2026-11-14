@@ -101,6 +101,7 @@ if ($Action -eq 'Verify') {
     }
 }
 
-$results | Format-Table -AutoSize | Out-String | Write-Host
+# The per-script timing table only means something when scripts did real work.
+if ($Action -ne 'Detect') { $results | Format-Table -AutoSize | Out-String | Write-Host }
 Stop-Transcript | Out-Null
 Write-Host "  Full log: $log" -ForegroundColor DarkGray
