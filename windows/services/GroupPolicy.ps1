@@ -10,7 +10,7 @@
 param(
     [ValidateSet('Info', 'Backup', 'Restore', 'Verify', 'Detect', 'All')][string]$Action = 'All',
     [string]$RestoreFrom,
-    [string]$BackupRoot = 'C:\CCDC_Backups\Services',
+    [string]$BackupRoot = 'C:\ccdc\backups\services',
     [switch]$Force,
     [string]$GpoName
 )

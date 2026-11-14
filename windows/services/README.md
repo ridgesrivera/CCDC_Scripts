@@ -1,9 +1,9 @@
-# Services/: one script per Windows service
+# windows/services/: one script per Windows service
 
 Each script covers one Windows service or role and does four things:
 
 1. **Info**: what the service is, which Windows service names it uses, its binary, signature, run-as account and service DACL. It lists the ports it should use and what is actually listening, live connections grouped by remote IP, and the inbound firewall rules that cover those ports. It finishes with service-specific checks for red team activity, how red team abuses the service, and hardening steps.
-2. **Backup**: writes to `C:\CCDC_Backups\Services\<Service>\<yyyyMMdd_HHmmss>\`. The folder is locked to Administrators and SYSTEM. Every backup includes the service's registry definition, `sc qc`, the service DACL, failure actions, a `MANIFEST.csv` of SHA256 hashes, and `BACKUP_INFO.json`.
+2. **Backup**: writes to `C:\ccdc\backups\services\<Service>\<yyyyMMdd_HHmmss>\`. The folder is locked to Administrators and SYSTEM. Every backup includes the service's registry definition, `sc qc`, the service DACL, failure actions, a `MANIFEST.csv` of SHA256 hashes, and `BACKUP_INFO.json`.
 3. **Restore**: restores from the latest backup, or from the folder given with `-RestoreFrom`. It verifies the backup hashes first and asks you to type `YES`. Most scripts also list what red team **added** since the backup: new users, shares, tasks, GPOs, firewall rules, keys.
 4. **Verify**: re-hashes the latest backup to show whether someone tampered with it.
 
@@ -14,12 +14,12 @@ Every script is safe to run on any box. If its service is not installed, it prin
 ```powershell
 # elevated PowerShell, from the repo folder
 Set-ExecutionPolicy -Scope Process Bypass -Force
-cd .\Services
+cd .\windows\services
 
 .\Invoke-AllServices.ps1 -Action Detect            # what's on this box?
 .\Invoke-AllServices.ps1                           # back up everything that's present
 .\Invoke-AllServices.ps1 -OffboxPath \\<teambox>\share   # ...and copy it off the box
-.\Invoke-AllServices.ps1 -Action Info              # full write-up of every service -> C:\CCDC_Logs
+.\Invoke-AllServices.ps1 -Action Info              # full write-up of every service -> C:\ccdc\logs
 ```
 
 For a single service:
@@ -29,13 +29,15 @@ For a single service:
 .\DNS.ps1 -Action Info
 .\DNS.ps1 -Action Backup
 .\DNS.ps1 -Action Restore   # latest backup, asks YES
-.\DNS.ps1 -Action Restore -RestoreFrom C:\CCDC_Backups\Services\DNS\20261114_091500
+.\DNS.ps1 -Action Restore -RestoreFrom C:\ccdc\backups\services\DNS\20261114_091500
 .\DNS.ps1 -Action Verify
 ```
 
 `-Force` skips the YES prompts. `-BackupRoot D:\somewhere` changes the backup location.
 
-The launcher `00_LAUNCH.ps1` has a new menu option **[S]** that runs `Invoke-AllServices.ps1`.
+`windows\Launch-Toolkit.ps1` has a menu option **[S]** under BACKUP / LOGGING / HUNT. It asks which action you want (detect, back up, info, verify) and, for a backup, an optional off-box path, then runs `Invoke-AllServices.ps1`.
+
+These scripts complement `..\backup\Backup-Box.ps1`. Backup-Box takes one quick snapshot of the whole box. These scripts go service by service and can also restore.
 
 ## Scripts
 
@@ -68,8 +70,8 @@ The launcher `00_LAUNCH.ps1` has a new menu option **[S]** that runs `Invoke-All
 
 ## Things to know
 
-- **Back up before you harden.** Run `WindowsFirewall.ps1 -Action Backup` before `..\08_Firewall.ps1`. Then a bad rule takes one command to undo.
-- **Copy backups off the box.** Red team with admin can delete `C:\CCDC_Backups`. Use `-OffboxPath`, or copy the folder to your jump box.
+- **Back up before you harden.** Run `WindowsFirewall.ps1 -Action Backup` before `..\harden\Set-Firewall.ps1`. Then a bad rule takes one command to undo.
+- **Copy backups off the box.** Red team with admin can delete `C:\ccdc\backups`. Use `-OffboxPath`, or copy the folder to your jump box.
 - **Some backups contain secrets:** `ActiveDirectory.ps1 -IncludeNTDS` (every password hash), the ADCS CA key, OpenSSH host keys, IIS .pfx files, OpenVPN keys. Your packets list "recovery of user IDs and passwords from a team system (AD with hashes, SAM file)" at **-50 points**. Only create these when you need them, keep them off the box or encrypted, and delete them when you're done.
 - **Database scripts need credentials** when integrated auth doesn't work:
   `.\MSSQL.ps1 -SqlUser sa -SqlPassword '...'` and `.\MySQL.ps1 -DbUser root -DbPassword '...'`.
@@ -77,7 +79,7 @@ The launcher `00_LAUNCH.ps1` has a new menu option **[S]** that runs `Invoke-All
 - **ADCS asks for a password** to protect the CA key, unless you pass `-KeyPassword`.
 - **Restore is per service on purpose.** Look at what Info says before you restore. After every restore, **check the scoring engine**.
 - **Do not touch the competition's VPN or scoring agent** (for example NetBird, `C:\ProgramData\netbird`). It is how the scoring engine and your team reach the box.
-- Local accounts and the SAM are not a "service", so `..\01_UserAudit.ps1` covers them. Registry Run keys and persistence are covered by `..\Invoke-PersistenceHunt.ps1`.
+- Local accounts and the SAM are not a "service", so `..\audit\Audit-Users.ps1` covers them. Registry Run keys and persistence are covered by `..\audit\Audit-Persistence.ps1`.
 
 ## Adding a new service
 

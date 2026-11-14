@@ -41,6 +41,7 @@ $menu = @(
     @{ Key = '11'; Name = 'IIS / PHP hardening';     File = 'harden\Harden-IIS-PHP.ps1';     RO = $false; Desc = 'Backup web roots, WP DISALLOW_FILE_EDIT, config perms, WP admins/plugins' }
     @{ Key = 'B';  Name = 'Backup this box';         File = 'backup\Backup-Box.ps1';         RO = $false; Desc = 'Registry, tasks, firewall, AD/GPO/DNS (DC), IIS -> C:\ccdc\backups' }
     @{ Key = 'L';  Name = 'Setup logging';           File = 'logging\Setup-Logging.ps1';     RO = $false; Desc = 'Audit policy, PS logging, Sysmon (if staged), forward to Graylog' }
+    @{ Key = 'S';  Name = 'Per-service backup';      File = 'services\Invoke-AllServices.ps1'; RO = $false; Desc = 'Detect every service (DNS, IIS, SQL, SMB...), back up / info / verify each -> C:\ccdc\backups\services' }
     @{ Key = 'W';  Name = 'Watch for changes';       File = 'hunt\Watch-Changes.ps1';        RO = $true;  Desc = 'Baseline once, then diff every 15 min' }
 )
 
@@ -123,7 +124,7 @@ function Show-Menu {
     foreach ($m in $menu | Where-Object { $_.Key -in '7', '8', '9', '10', '11' }) { Write-MenuLine $m 'White' }
     Write-Host ""
     Write-Host '  BACKUP / LOGGING / HUNT' -ForegroundColor Magenta
-    foreach ($m in $menu | Where-Object { $_.Key -in 'B', 'L', 'W' }) { Write-MenuLine $m 'White' }
+    foreach ($m in $menu | Where-Object { $_.Key -in 'B', 'S', 'L', 'W' }) { Write-MenuLine $m 'White' }
     Write-Host ""
     Write-Host '  [H]  Explain a script (show its header)     [Q]  Quit' -ForegroundColor DarkGray
     Write-Host ""
@@ -137,6 +138,20 @@ function Write-MenuLine($m, $color) {
 function Invoke-Entry($m) {
     $path = Join-Path $here $m.File
     if (-not (Test-Path $path)) { Write-Host "  Not found: $path" -ForegroundColor Red; return }
+    if ($m.Key -eq 'S') {
+        # services\*.ps1 have their own -Action switch (no -WhatIf / -ConfigPath), so ask directly.
+        $a = Read-Host '  [1] detect what is installed  [2] back up everything present  [3] full info write-up  [4] verify backups'
+        $act = switch ($a) { '1' { 'Detect' } '2' { 'Backup' } '3' { 'Info' } '4' { 'Verify' } default { $null } }
+        if (-not $act) { Write-Host '  Cancelled.' -ForegroundColor DarkGray; return }
+        $sp = @{ Action = $act }
+        if ($act -eq 'Backup') {
+            $off = Read-Host '  Also copy backups off-box to (UNC path, Enter = skip)'
+            if ($off) { $sp.OffboxPath = $off }
+        }
+        & $path @sp
+        Write-Host '  Restore is per service: .\services\<Service>.ps1 -Action Restore' -ForegroundColor DarkGray
+        return
+    }
     $params = Get-ScriptParams $m.Key
     if ($null -eq $params) { Write-Host '  Cancelled.' -ForegroundColor DarkGray; return }
     if ($m.RO) {
@@ -163,7 +178,7 @@ while ($true) {
     $choice = (Read-Host 'Select option').Trim().ToUpper()
     if ($choice -eq 'Q') { break }
     if ($choice -eq 'H') {
-        $k = (Read-Host '  Which option? (1-11, B, L, W)').Trim().ToUpper()
+        $k = (Read-Host '  Which option? (1-11, B, S, L, W)').Trim().ToUpper()
         $m = $menu | Where-Object { $_.Key -eq $k }
         if ($m) { Get-Help (Join-Path $here $m.File) -Full | Out-Host -Paging }
     } elseif ($choice -eq 'A') {

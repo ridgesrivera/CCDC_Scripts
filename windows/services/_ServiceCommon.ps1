@@ -18,7 +18,7 @@
 
     Every per-service script supports:
         -Action Info     what the service is, ports, connections, firewall, risks
-        -Action Backup   back the service up to C:\CCDC_Backups\Services\<Svc>\<stamp>
+        -Action Backup   back the service up to C:\ccdc\backups\services\<Svc>\<stamp>
         -Action Restore  restore from the latest backup (or -RestoreFrom <dir>)
         -Action Verify   re-hash the latest backup and compare to its manifest
         -Action Detect   one line: is this service on this box?
@@ -42,7 +42,7 @@ function Write-STEP   { param([string]$m) Write-Host "`n>> $m" -ForegroundColor 
 function Write-Plain  { param([string]$m) Write-Host "         $m" -ForegroundColor Gray }
 
 $script:CCDCStamp = Get-Date -Format "yyyyMMdd_HHmmss"
-if (-not $script:CCDCBackupRoot) { $script:CCDCBackupRoot = "C:\CCDC_Backups\Services" }
+if (-not $script:CCDCBackupRoot) { $script:CCDCBackupRoot = "C:\ccdc\backups\services" }
 
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()

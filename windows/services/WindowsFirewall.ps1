@@ -5,13 +5,13 @@
 .DESCRIPTION
     Backup = netsh advfirewall export (.wfw, the native full-fidelity format) + CSV of rules.
     Restore = netsh advfirewall import  (REPLACES all local rules - GPO rules unaffected).
-    TIP: take a backup BEFORE running ..\08_Firewall.ps1, so a bad rule is one command to undo.
+    TIP: take a backup BEFORE running ..\harden\Set-Firewall.ps1, so a bad rule is one command to undo.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Info', 'Backup', 'Restore', 'Verify', 'Detect', 'All')][string]$Action = 'All',
     [string]$RestoreFrom,
-    [string]$BackupRoot = 'C:\CCDC_Backups\Services',
+    [string]$BackupRoot = 'C:\ccdc\backups\services',
     [switch]$Force
 )
 . "$PSScriptRoot\_ServiceCommon.ps1"
@@ -38,7 +38,7 @@ BFE (Base Filtering Engine) must be running or the firewall AND IPsec stop.
         'All profiles ON, default inbound Block'
         'Delete inbound allow rules for ports you do not serve'
         'Enable logging: Set-NetFirewallProfile -All -LogBlocked True -LogAllowed True -LogFileName %windir%\System32\LogFiles\Firewall\pfirewall.log'
-        'Run ..\08_Firewall.ps1 for team-specific lockdown'
+        'Run ..\harden\Set-Firewall.ps1 for team-specific lockdown'
     )
     Detect       = { Test-ServiceInstalled 'MpsSvc' }
 }

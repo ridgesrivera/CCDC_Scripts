@@ -10,7 +10,7 @@
 param(
     [ValidateSet('Info', 'Backup', 'Restore', 'Verify', 'Detect', 'All')][string]$Action = 'All',
     [string]$RestoreFrom,
-    [string]$BackupRoot = 'C:\CCDC_Backups\Services',
+    [string]$BackupRoot = 'C:\ccdc\backups\services',
     [switch]$Force,
     [switch]$Mirror
 )
@@ -84,7 +84,7 @@ XAMPP's control panel may run Apache/MySQL as plain processes, not services.
         'Change / remove users in tomcat-users.xml; restrict manager to 127.0.0.1 (META-INF\context.xml RemoteAddrValve)'
         'Comment out AJP connector if unused'
         'Restrict /phpmyadmin + /dashboard to localhost (httpd-xampp.conf: Require local)'
-        'Run ..\09_NonWinServices.ps1 for more PHP/config checks'
+        'Run ..\harden\Harden-IIS-PHP.ps1 for PHP/WordPress hardening'
     )
     Detect       = { [bool](Find-WebStacks) }
 }

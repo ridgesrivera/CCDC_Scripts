@@ -6,13 +6,13 @@
     .\DNS.ps1                      # info + backup
     .\DNS.ps1 -Action Info
     .\DNS.ps1 -Action Restore      # restore latest backup (asks YES)
-    .\DNS.ps1 -Action Restore -RestoreFrom C:\CCDC_Backups\Services\DNS\20261114_090102
+    .\DNS.ps1 -Action Restore -RestoreFrom C:\ccdc\backups\services\DNS\20261114_090102
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Info', 'Backup', 'Restore', 'Verify', 'Detect', 'All')][string]$Action = 'All',
     [string]$RestoreFrom,
-    [string]$BackupRoot = 'C:\CCDC_Backups\Services',
+    [string]$BackupRoot = 'C:\ccdc\backups\services',
     [switch]$Force
 )
 . "$PSScriptRoot\_ServiceCommon.ps1"

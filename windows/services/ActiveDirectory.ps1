@@ -23,7 +23,7 @@
 param(
     [ValidateSet('Info', 'Backup', 'Restore', 'Verify', 'Detect', 'All')][string]$Action = 'All',
     [string]$RestoreFrom,
-    [string]$BackupRoot = 'C:\CCDC_Backups\Services',
+    [string]$BackupRoot = 'C:\ccdc\backups\services',
     [switch]$Force,
     [switch]$IncludeNTDS,
     [string]$SystemStateTarget
@@ -76,7 +76,7 @@ If red team owns the DC they own every box. Protect it first.
         'Enable AD Recycle Bin: Enable-ADOptionalFeature "Recycle Bin Feature" -Scope ForestOrConfigurationSet -Target <forest>'
         'Remove unknown members of privileged groups (see Info output)'
         'Disable Print Spooler on DCs; require SMB signing; enforce LDAP signing'
-        'Run ..\07_ADSecurity.ps1 for kerberoast / asrep / AdminSDHolder checks'
+        'Run ..\audit\Audit-AD-GPO.ps1 and ..\audit\Audit-Users.ps1 for delegation / roasting / ACL checks'
     )
     Detect       = { (Test-IsDomainController) -and (Test-ServiceInstalled 'NTDS') }
 }

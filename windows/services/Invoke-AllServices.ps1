@@ -25,7 +25,7 @@ param(
     [ValidateSet('Detect', 'Info', 'Backup', 'Verify')][string]$Action = 'Backup',
     [string[]]$Only,
     [string[]]$Skip,
-    [string]$BackupRoot = 'C:\CCDC_Backups\Services',
+    [string]$BackupRoot = 'C:\ccdc\backups\services',
     [string]$OffboxPath,
     [string]$DbUser,
     [string]$DbPassword,
@@ -35,7 +35,7 @@ param(
 )
 . "$PSScriptRoot\_ServiceCommon.ps1"
 
-$logDir = 'C:\CCDC_Logs'; New-Item -ItemType Directory $logDir -Force | Out-Null
+$logDir = 'C:\ccdc\logs'; New-Item -ItemType Directory $logDir -Force | Out-Null
 $log = Join-Path $logDir "Services_$($Action)_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 Start-Transcript -Path $log -Force | Out-Null
 
