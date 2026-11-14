@@ -39,6 +39,7 @@ windows/
   recon/  audit/            READ-ONLY
   harden/                   changes state: -WhatIf, confirm per action, -Force, backups
   backup/  logging/  hunt/
+  services/                 one script per service (AD, DNS, IIS, SQL, SMB, RDP...): info, backup, restore
 config/                     example config (no secrets)
 docs/                       first-15-minutes, per-box pages, incident response, teaching guide
 tools/                      how to stage Sysmon/Winlogbeat offline (+ lint scripts)
