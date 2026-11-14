@@ -1,0 +1,116 @@
+{
+  "_readme": [
+    "EXAMPLE config for the 'Great Cretaceous' practice pod (lab mirror on 192.168.100.0/24).",
+    "At competition: copy this file to config/ccdc.json and change the subnet/IPs to match the team packet.",
+    "config/ccdc.json is in .gitignore so competition-day values are never committed.",
+    "NEVER put passwords in this file. Scored ports below are EDUCATED GUESSES - confirm against the packet / scoreboard.",
+    "scoredAccounts = accounts the scoring engine logs in with. Rotation scripts auto-exclude them (you need a Password Change Request first)."
+  ],
+  "competition": "WRCCDC practice - Great Cretaceous",
+  "subnet": "192.168.100.0/24",
+  "adminSources": ["192.168.100.0/24"],
+  "domain": {
+    "netbios": "GREAT",
+    "fqdn": "great.local",
+    "dcHost": "trex"
+  },
+  "graylog": {
+    "host": "tarpit",
+    "ip": "192.168.100.170",
+    "gelfUdpPort": 12201,
+    "beatsPort": 5044,
+    "syslogUdpPort": 514
+  },
+  "hosts": [
+    {
+      "name": "pangea",
+      "ip": "192.168.100.2",
+      "os": "Alpine Linux",
+      "role": "Router / firewall",
+      "scoredServices": [],
+      "scoredPorts": { "tcp": [], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "Gateway for the whole pod. Breaking routing breaks EVERY scored service."
+    },
+    {
+      "name": "trex",
+      "ip": "192.168.100.12",
+      "os": "Windows Server 2016",
+      "role": "Domain Controller (GREAT / great.local), DNS",
+      "scoredServices": ["DNS", "LDAP", "Kerberos", "SMB"],
+      "scoredPorts": { "tcp": [53, 88, 135, 389, 445, 464, 636, 3268, 3269, 3389], "udp": [53, 88, 123, 389, 464] },
+      "scoredAccounts": [],
+      "notes": "Keycloak on hellcreek likely binds to LDAP here with a service account - do not break that account."
+    },
+    {
+      "name": "fossil",
+      "ip": "192.168.100.20",
+      "os": "Windows 10",
+      "role": "Workstation",
+      "scoredServices": ["RDP", "SSH"],
+      "scoredPorts": { "tcp": [22, 3389], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "Scoring engine probably logs in over RDP/SSH with a domain or local user."
+    },
+    {
+      "name": "fernbank",
+      "ip": "192.168.100.37",
+      "os": "Windows Server 2022",
+      "role": "IIS + PHP: WordPress and MediaWiki",
+      "scoredServices": ["HTTP", "HTTPS", "WordPress", "MediaWiki"],
+      "scoredPorts": { "tcp": [80, 443], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "Databases live on hatchery. DB password changes there must be mirrored in wp-config.php and LocalSettings.php."
+    },
+    {
+      "name": "laboratory",
+      "ip": null,
+      "os": "Alpine Linux 3.23",
+      "role": "DevOps box",
+      "scoredServices": [],
+      "scoredPorts": { "tcp": [22], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "IP not in the practice packet - fill in. Check for CI runners, git servers, docker."
+    },
+    {
+      "name": "hatchery",
+      "ip": "192.168.100.76",
+      "os": "Ubuntu 22.04",
+      "role": "MySQL + MinIO",
+      "scoredServices": ["MySQL", "MinIO", "SSH"],
+      "scoredPorts": { "tcp": [22, 3306, 9000, 9001], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "MySQL must stay reachable from fernbank (do NOT bind to 127.0.0.1)."
+    },
+    {
+      "name": "hellcreek",
+      "ip": "192.168.100.103",
+      "os": "Ubuntu 22.04",
+      "role": "Keycloak SSO (likely LDAP-federated to trex)",
+      "scoredServices": ["Keycloak", "SSH"],
+      "scoredPorts": { "tcp": [22, 8080, 8443], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "Federation bind account lives in AD on trex."
+    },
+    {
+      "name": "badlands",
+      "ip": null,
+      "os": "Fedora 42",
+      "role": "Front-facing websites",
+      "scoredServices": ["HTTP", "HTTPS", "SSH"],
+      "scoredPorts": { "tcp": [22, 80, 443], "udp": [] },
+      "scoredAccounts": [],
+      "notes": "IP not in the practice packet - fill in. SELinux is on by default on Fedora."
+    },
+    {
+      "name": "tarpit",
+      "ip": "192.168.100.170",
+      "os": "Fedora 42",
+      "role": "Graylog (central logging)",
+      "scoredServices": ["Graylog web", "SSH"],
+      "scoredPorts": { "tcp": [22, 9000, 5044], "udp": [514, 12201] },
+      "scoredAccounts": [],
+      "notes": "Our own log sink. Graylog depends on MongoDB + OpenSearch/Elasticsearch running locally."
+    }
+  ]
+}
