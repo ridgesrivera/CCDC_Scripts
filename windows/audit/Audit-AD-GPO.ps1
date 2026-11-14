@@ -84,7 +84,7 @@ foreach ($g in ($gpos | Sort-Object { [datetime](Get-Prop $_ 'whenchanged') } -D
 }
 # Where GPOs are linked (gPLink on domain root and OUs).
 foreach ($ou in (Search-Ldap '(gPLink=*)' @('distinguishedName', 'gPLink'))) {
-    Write-Finding -Level INFO -Category 'GPOLink' -Message ("{0} links {1}" -f (Get-Prop $ou 'distinguishedname'), ((Get-Prop $ou 'gplink') -replace '\[LDAP://cn=|,cn=policies[^\]]*\]', ' ').Trim())
+    Write-Finding -Level INFO -Category 'GPOLink' -Message ("{0} links {1}" -f (Get-Prop $ou 'distinguishedname'), ((Get-Prop $ou 'gplink') -replace '(?i)\[LDAP://cn=|,cn=policies[^\]]*\]', ' ').Trim())
 }
 
 Write-Section "SYSVOL files changed in the last $RecentDays days"
@@ -123,6 +123,12 @@ function Test-Acl([string]$dn, [string]$label) {
         if ($replGuids.ContainsKey($guid)) {
             $ok = $who -match '(?i)\\Domain Controllers$|ENTERPRISE DOMAIN CONTROLLERS|BUILTIN\\Administrators|\\Read-only Domain Controllers|\\Enterprise Read-only Domain Controllers'
             if (-not $ok) { $found++; Write-Finding -Level RED -Category 'DCSync' -Message "$who has $($replGuids[$guid]) on $label - can DCSync (dump all hashes)" }
+            continue
+        }
+        # ExtendedRight with an empty ObjectType = ALL extended rights, which includes both replication rights.
+        if ($rights -match 'ExtendedRight' -and $guid -eq '00000000-0000-0000-0000-000000000000' -and $who -notmatch $expectedPrincipals) {
+            $found++
+            Write-Finding -Level RED -Category 'DCSync' -Message "$who has ALL extended rights on $label - includes DCSync"
             continue
         }
         if ($rights -match $dangerous -and $who -notmatch $expectedPrincipals) {

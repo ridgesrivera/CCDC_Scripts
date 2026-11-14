@@ -81,9 +81,16 @@ if ($Preset -eq 'DC' -or (Test-CcdcIsDC)) {
     $dcRpcRange = '49152-65535'
 } else { $dcRpcRange = $null }
 if (Get-Service sshd -ErrorAction SilentlyContinue) { $AdminPorts += 22 }
-$AllowTcp   = @($AllowTcp | Where-Object { $AdminPorts -notcontains $_ } | Sort-Object -Unique)  # admin ports get their own restricted rule
+$AllowTcp   = @($AllowTcp | Sort-Object -Unique)
 $AllowUdp   = @($AllowUdp | Sort-Object -Unique)
-$AdminPorts = @($AdminPorts | Sort-Object -Unique)
+# A port that is SCORED (in -AllowTcp / config) must stay open to Any: the
+# scoring engine is often NOT in adminSources. So a scored RDP/SSH/WinRM port
+# gets an Any rule and is dropped from the restricted admin rule.
+$scoredAdmin = @($AdminPorts | Where-Object { $AllowTcp -contains $_ } | Sort-Object -Unique)
+$AdminPorts  = @($AdminPorts | Where-Object { $AllowTcp -notcontains $_ } | Sort-Object -Unique)
+if ($scoredAdmin) {
+    Write-Finding -Level YELLOW -Category 'Plan' -Message ("Scored admin port(s) {0} stay open to ANY source (scoring engine needs them). Protect them with strong passwords/NLA instead." -f ($scoredAdmin -join ', '))
+}
 if (-not $AllowTcp -and -not $AllowUdp) {
     Write-Finding -Level RED -Category 'Plan' -Message 'No ports to allow. Pass -AllowTcp/-AllowUdp or add this host to config. Refusing to default-deny blind.'
     Complete-Ccdc; return
@@ -91,7 +98,7 @@ if (-not $AllowTcp -and -not $AllowUdp) {
 
 # Who is connected right now? Their IPs are ALWAYS allowed on admin ports.
 $liveAdmins = @(Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue |
-    Where-Object { $AdminPorts -contains [int]$_.LocalPort -and $_.RemoteAddress -notmatch '^(127\.|::1$)' } |
+    Where-Object { ($AdminPorts + $scoredAdmin) -contains [int]$_.LocalPort -and $_.RemoteAddress -notmatch '^(127\.|::1$)' } |
     ForEach-Object { $_.RemoteAddress } | Sort-Object -Unique)
 if (-not $AdminSources -and $config -and $config.adminSources) { $AdminSources = @($config.adminSources) }
 if (-not $AdminSources) { $AdminSources = @('LocalSubnet') }   # firewall keyword = this box's own subnet(s)
@@ -131,7 +138,7 @@ function Add-AllowRule([string]$DisplayName, [string]$Proto, [string[]]$Ports, [
 foreach ($p in $AllowTcp) { Add-AllowRule "CCDC Allow TCP $p" 'TCP' @("$p") }
 foreach ($p in $AllowUdp) { Add-AllowRule "CCDC Allow UDP $p" 'UDP' @("$p") }
 if ($dcRpcRange) { Add-AllowRule "CCDC Allow TCP RPC $dcRpcRange" 'TCP' @($dcRpcRange) }
-Add-AllowRule ("CCDC Admin TCP {0}" -f ($AdminPorts -join ',')) 'TCP' ($AdminPorts | ForEach-Object { "$_" }) $adminRemote
+if ($AdminPorts) { Add-AllowRule ("CCDC Admin TCP {0}" -f ($AdminPorts -join ',')) 'TCP' ($AdminPorts | ForEach-Object { "$_" }) $adminRemote }
 
 # ---------------------------------------------------------------------------
 # 4. Safety net: scheduled rollback (interactive runs only)

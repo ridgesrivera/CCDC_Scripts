@@ -23,6 +23,11 @@
      10. Defender exclusions   paths/processes/extensions Defender ignores
      11. System32 changes      .exe/.dll/.sys modified in the last -RecentDays days
      12. Web shells            recent .php/.asp/.aspx/... in IIS web roots + eval/base64/system patterns
+     13. LSA packages          unknown SSP / password-filter DLLs loaded into LSASS (memssp, mimilib)
+     14. Netsh helper DLLs     non-Microsoft DLLs loaded by every netsh.exe run
+     15. Hidden tasks          tasks whose registry SD was deleted so schtasks cannot see them
+     16. svchost ServiceDll    service DLL swapped to a file outside System32
+     17. PS profiles/BootExec  profile.ps1 scripts that run on every PowerShell start; BootExecute
 
     WHAT IT READS   registry, Task Scheduler, WMI, file system, Defender preferences
     WHAT IT CHANGES nothing (own log + optional report only)
@@ -331,5 +336,121 @@ foreach ($r in $roots) {
         Write-Finding -Level RED -Category 'WebShell' -Message "PHP file inside an uploads folder: $($_.FullName)"
     }
 }
+
+# ---------------------------------------------------------------------------
+Write-Section '13. LSA packages (password filters / SSPs loaded into LSASS)'
+# ---------------------------------------------------------------------------
+# A DLL listed here is loaded into LSASS at boot and sees every password in
+# clear text (mimikatz "misc::memssp" / mimilib, custom password filters).
+$lsaKnown = @{
+    'Authentication Packages' = @('msv1_0')
+    'Notification Packages'   = @('scecli', 'rassfm')          # rassfm = RRAS servers
+    'Security Packages'       = @('', '""', 'kerberos', 'msv1_0', 'schannel', 'wdigest', 'tspkg', 'pku2u', 'cloudap', 'negoexts', 'livessp')
+}
+$lsaFound = 0
+foreach ($k in @('HKLM:\SYSTEM\CurrentControlSet\Control\Lsa', 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\OSConfig')) {
+    $v = Get-ItemProperty $k -ErrorAction SilentlyContinue
+    if (-not $v) { continue }
+    foreach ($name in $lsaKnown.Keys) {
+        foreach ($pkg in @($v.$name)) {
+            if ($null -eq $pkg) { continue }
+            $p = ([string]$pkg).Trim()
+            if ($lsaKnown[$name] -contains $p.ToLower()) { continue }
+            $lsaFound++
+            Write-Finding -Level RED -Category 'LSA' -Message ("{0} contains '{1}' ({2})" -f $name, $p, ($k -replace '^HKLM:\\SYSTEM\\CurrentControlSet\\Control\\', '')) -Detail 'Unknown DLL loaded into LSASS - can capture every password. Check %windir%\System32\<name>.dll signature.'
+        }
+    }
+}
+if ($lsaFound -eq 0) { Write-Finding -Level GREEN -Category 'LSA' -Message 'LSA authentication/notification/security packages are all defaults.' }
+
+# ---------------------------------------------------------------------------
+Write-Section '14. Netsh helper DLLs'
+# ---------------------------------------------------------------------------
+# Every netsh.exe run loads these DLLs. Default helpers are bare file names in System32.
+$nsFound = 0
+$ns = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NetSh' -ErrorAction SilentlyContinue
+if ($ns) {
+    foreach ($p in $ns.PSObject.Properties) {
+        if ($p.Name -like 'PS*') { continue }
+        $dll = [string]$p.Value
+        $full = if ($dll -match '\\') { [Environment]::ExpandEnvironmentVariables($dll) } else { Join-Path "$env:windir\System32" $dll }
+        $sig = if (Test-Path -LiteralPath $full) { (Get-AuthenticodeSignature -FilePath $full -ErrorAction SilentlyContinue) } else { $null }
+        $msSigned = $sig -and $sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -match 'Microsoft'
+        if ($dll -match '\\' -or -not $msSigned) {
+            $nsFound++
+            $lvl = if (-not $msSigned) { 'RED' } else { 'YELLOW' }
+            Write-Finding -Level $lvl -Category 'NetshHelper' -Message ("{0} = {1}" -f $p.Name, $dll) -Detail ("signature: {0}" -f $(if ($sig) { $sig.Status } else { 'file not found' }))
+        }
+    }
+}
+if ($nsFound -eq 0) { Write-Finding -Level GREEN -Category 'NetshHelper' -Message 'Netsh helpers are Microsoft-signed System32 DLLs.' }
+
+# ---------------------------------------------------------------------------
+Write-Section '15. Hidden scheduled tasks (registry vs Task Scheduler)'
+# ---------------------------------------------------------------------------
+# Red Team trick ("Tarrask"): delete a task's SD value in the registry and it
+# disappears from schtasks / Get-ScheduledTask / Task Scheduler, but still runs.
+$treeRoot = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree'
+$hidden = 0
+if (Test-Path $treeRoot) {
+    $visible = @{}
+    foreach ($t in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) { $visible[("$($t.TaskPath)$($t.TaskName)").ToLower()] = $true }
+    foreach ($key in (Get-ChildItem $treeRoot -Recurse -ErrorAction SilentlyContinue)) {
+        $props = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue
+        if (-not $props -or -not ($props.PSObject.Properties.Name -contains 'Id')) { continue }   # folders have no Id
+        $taskPath = '\' + ($key.Name -replace '^.*\\TaskCache\\Tree\\', '')
+        $noSd = -not ($props.PSObject.Properties.Name -contains 'SD')
+        $notListed = $visible.Count -gt 0 -and -not $visible.ContainsKey($taskPath.ToLower())
+        if ($noSd -or $notListed) {
+            $hidden++
+            $why = @(); if ($noSd) { $why += 'no SD value (hidden on purpose)' }; if ($notListed) { $why += 'not returned by Get-ScheduledTask' }
+            # No SD = deliberately hidden (RED). Merely "not listed" can be an ACL quirk (YELLOW).
+            Write-Finding -Level $(if ($noSd) { 'RED' } else { 'YELLOW' }) -Category 'HiddenTask' -Message ("{0}  - {1}" -f $taskPath, ($why -join ', ')) -Detail ("Inspect: HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks\{0}  and  %windir%\System32\Tasks{1}" -f $props.Id, $taskPath)
+        }
+    }
+}
+if ($hidden -eq 0) { Write-Finding -Level GREEN -Category 'HiddenTask' -Message 'No hidden scheduled tasks (registry matches Task Scheduler).' }
+
+# ---------------------------------------------------------------------------
+Write-Section '16. svchost ServiceDll hijacks'
+# ---------------------------------------------------------------------------
+# svchost services run whatever DLL Parameters\ServiceDll points to. Swapping
+# that one value keeps the familiar service name while running Red Team code.
+$sdFound = 0
+foreach ($svcKey in (Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services' -ErrorAction SilentlyContinue)) {
+    $dll = (Get-ItemProperty (Join-Path $svcKey.PSPath 'Parameters') -Name ServiceDll -ErrorAction SilentlyContinue).ServiceDll
+    if (-not $dll) { continue }
+    $full = [Environment]::ExpandEnvironmentVariables([string]$dll)
+    if ($full -match '(?i)^[A-Z]:\\Windows\\(System32|SysWOW64)\\') { continue }
+    $sdFound++
+    $lvl = if ($full -match $badPathRegex -or $full -notmatch '(?i)^[A-Z]:\\(Windows|Program Files)') { 'RED' } else { 'YELLOW' }
+    Write-Finding -Level $lvl -Category 'ServiceDll' -Message ("{0} ServiceDll = {1}" -f $svcKey.PSChildName, $dll) -Detail 'Expected under %windir%\System32. Check signature: Get-AuthenticodeSignature <path>'
+}
+if ($sdFound -eq 0) { Write-Finding -Level GREEN -Category 'ServiceDll' -Message 'All svchost ServiceDll values point into System32.' }
+
+# ---------------------------------------------------------------------------
+Write-Section '17. PowerShell profiles and BootExecute'
+# ---------------------------------------------------------------------------
+# A profile runs every time PowerShell starts - including when YOU start it as admin.
+$profiles = @("$PSHOME\profile.ps1", "$PSHOME\Microsoft.PowerShell_profile.ps1",
+              "$env:windir\System32\WindowsPowerShell\v1.0\profile.ps1", "$env:windir\System32\WindowsPowerShell\v1.0\Microsoft.PowerShell_profile.ps1")
+$profiles += Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    Join-Path $_.FullName 'Documents\WindowsPowerShell\profile.ps1'
+    Join-Path $_.FullName 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1'
+    Join-Path $_.FullName 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'
+}
+$pf = 0
+foreach ($p in ($profiles | Sort-Object -Unique)) {
+    if (-not (Test-Path -LiteralPath $p)) { continue }
+    $pf++
+    $body = Get-Content -LiteralPath $p -Raw -ErrorAction SilentlyContinue
+    $lvl = if ($body -match $badCmdRegex) { 'RED' } else { 'YELLOW' }
+    Write-Finding -Level $lvl -Category 'PSProfile' -Message "PowerShell profile exists: $p" -Detail ("modified {0}. Read it before trusting any PowerShell window on this box." -f (Get-Item -LiteralPath $p).LastWriteTime)
+}
+if ($pf -eq 0) { Write-Finding -Level GREEN -Category 'PSProfile' -Message 'No PowerShell profile scripts.' }
+$be = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name BootExecute -ErrorAction SilentlyContinue).BootExecute
+$beOdd = @($be | Where-Object { $_ -and $_ -notmatch '(?i)^autocheck autochk( /q /v)? \*$' })
+if ($beOdd) { foreach ($b in $beOdd) { Write-Finding -Level RED -Category 'BootExecute' -Message "BootExecute entry: $b" -Detail 'Default is only: autocheck autochk *' } }
+else { Write-Finding -Level GREEN -Category 'BootExecute' -Message 'BootExecute is default.' }
 
 Complete-Ccdc

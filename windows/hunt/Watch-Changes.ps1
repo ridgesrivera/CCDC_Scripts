@@ -146,6 +146,11 @@ if ($Mode -eq 'Baseline') {
     return
 }
 
+if (-not (Test-Path $baselineFile)) {
+    Write-Finding -Level YELLOW -Category 'Diff' -Message "No baseline at $baselineFile yet. Run with -Mode Baseline first (or -Mode Auto)."
+    Complete-Ccdc
+    return
+}
 $base = (Get-Content $baselineFile -Raw | ConvertFrom-Json)
 Write-Finding -Level INFO -Category 'Diff' -Message "Baseline taken $($base.taken)"
 do {

@@ -16,5 +16,5 @@ User workstation, probably domain-joined to GREAT. Scoring likely logs in over *
 4. Defender disabled or excluded paths → `[3]` (exclusions), `[5]` (status), `[10] -Only EnableDefenderRealtime`.
 
 ## Careful with
-- `Set-Firewall.ps1`: keep 22 and 3389 allowed (they're in config). sshd is auto-detected and added to admin ports, but if SSH is *scored* it must be open to the scoring engine. Keep it in `-AllowTcp` / config scored ports, not only in admin sources.
+- `Set-Firewall.ps1`: 22 and 3389 are scored here (they're in config), so the script opens them to **any** source rather than only admin sources, because the scoring engine must reach them. If you pass `-AllowTcp` by hand, include 22 and 3389. Since they're open, protect them with strong passwords + NLA (`[10] -Only RequireRdpNla`).
 - Editing `sshd_config`: back it up first and run `sshd -t` before restarting the service.

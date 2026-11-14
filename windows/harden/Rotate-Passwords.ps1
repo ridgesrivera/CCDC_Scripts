@@ -243,20 +243,35 @@ $results = New-Object System.Collections.ArrayList   # in memory ONLY
 foreach ($acct in $final) {
     $newPw = if ($shared) { $shared } else { New-CcdcPassword $Length }
     $acctId = $acct.Id
+    # A hashtable is shared by reference with the scriptblock, so we can tell
+    # afterwards whether SetPassword itself succeeded even if a later step threw.
+    # Without this, a failure AFTER the password changed would hide the new
+    # password and lock everyone out of that account.
+    $state = @{ PasswordSet = $false; Warning = $null }
     $ok = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target "$Scope\$($acct.Name)" -Action 'Set new password' `
         -Undo 'no undo for passwords; re-run or reset manually' -ScriptBlock {
             if ($acctId -like 'WinNT://*') {
                 $obj = [ADSI]$acctId               # local account via WinNT provider
                 $obj.SetPassword($newPw)
+                $state.PasswordSet = $true
             } else {
                 $obj = [ADSI]"LDAP://$acctId"      # domain account via LDAP (needs LDAPS/Kerberos - fine on a DC)
                 $obj.Invoke('SetPassword', $newPw)
-                # Make sure the account is not forced to change at next logon (would break scoring logins).
-                $obj.Properties['pwdLastSet'].Value = -1
-                $obj.CommitChanges()
+                $state.PasswordSet = $true
+                # If "must change password at next logon" was set (pwdLastSet=0), clear it:
+                # it would break scoring logins. Best effort - the password is already set.
+                try {
+                    $obj.RefreshCache(@('pwdLastSet'))
+                    $pls = $obj.ConvertLargeIntegerToInt64($obj.Properties['pwdLastSet'].Value)
+                    if ($pls -eq 0) { $obj.InvokeSet('pwdLastSet', -1); $obj.CommitChanges() }
+                } catch { $state.Warning = "password set, but could not clear 'must change at next logon': $($_.Exception.Message)" }
             }
         }
-    if ($ok) { [void]$results.Add([pscustomobject]@{ Account = "$Scope\$($acct.Name)"; Password = $newPw }) }
+    if ($state.PasswordSet) {
+        if (-not $ok) { Write-Finding -Level YELLOW -Category 'Rotate' -Message "$($acct.Name): password WAS changed, but a follow-up step failed - it is still shown below." }
+        if ($state.Warning) { Write-Finding -Level YELLOW -Category 'Rotate' -Message "$($acct.Name): $($state.Warning)" }
+        [void]$results.Add([pscustomobject]@{ Account = "$Scope\$($acct.Name)"; Password = $newPw })
+    }
 }
 $newPw = $null; $shared = $null
 

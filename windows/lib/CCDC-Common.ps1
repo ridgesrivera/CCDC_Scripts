@@ -115,7 +115,8 @@ function Write-Finding {
     $color = @{ RED = 'Red'; YELLOW = 'Yellow'; GREEN = 'Green'; INFO = 'Gray' }[$Level]
     $tag   = @{ RED = '[!!]'; YELLOW = '[??]'; GREEN = '[OK]'; INFO = '[..]' }[$Level]
     Write-Host ("  {0} {1}" -f $tag, $Message) -ForegroundColor $color
-    if ($Detail) { Write-Host ("       {0}" -f $Detail) -ForegroundColor DarkGray }
+    # Multi-line details (separated by "`n") are each indented under the finding.
+    if ($Detail) { foreach ($dl in ($Detail -split "`n")) { Write-Host ("       {0}" -f $dl.TrimEnd()) -ForegroundColor DarkGray } }
 
     [void]$script:CcdcFindings.Add([pscustomobject]@{
         Time = (Get-Date -Format 'HH:mm:ss'); Level = $Level; Category = $Category

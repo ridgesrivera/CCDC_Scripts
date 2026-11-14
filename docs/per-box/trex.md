@@ -21,4 +21,6 @@ DNS (53), LDAP (389/636), Kerberos (88), SMB (445), maybe RDP (3389). Confirm ag
 5. AS-REP/Kerberoastable accounts → `[2]` flags them.
 
 ## First moves
-`[1]` → `[7]` (Domain Admins) → `[2]` → `[B]` (IFM + GPO + DNS) → `[6]` → `[3]` → `[9]` → `[10]`.
+`[1]` → `[7]` (Domain Admins) → `[2]` → `[B]` (GPO + DNS + LDIF; add `-IncludeAdIfm` only if you need ntds.dit) → `[6]` → `[P]` (GPO / DNS settings: zone transfers, insecure updates, reversible encryption) → `[3]` → `[9]` → `[10]`.
+
+LDAP signing is a CAUTION item here: Keycloak on hellcreek may bind over plain `ldap://389`. `[P]` shows the DC's unsigned-bind count (event 2887); only require signing when it is 0, or after moving Keycloak to `ldaps://636`.

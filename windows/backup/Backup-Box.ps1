@@ -11,16 +11,18 @@
       All boxes : key registry hives (Run keys, Winlogon, IFEO, Services, Lsa, SMB, policies),
                   scheduled tasks (one XML per task, re-importable), firewall policy (.wfw),
                   local users/groups list, service list, system info
-      DC        : AD database via ntdsutil IFM (ntds.dit + SYSTEM hive),
+      DC        : AD database via ntdsutil IFM (ntds.dit + SYSTEM hive) ONLY with -IncludeAdIfm,
                   all GPOs (Backup-GPO), DNS zones (dnscmd /ZoneExport),
                   users/groups/OUs as LDIF (ldifde - contains NO passwords)
       IIS       : appcmd config backup + applicationHost.config + every site's web root
 
     !! SENSITIVE OUTPUT !!
-      The IFM copy contains ntds.dit = every domain password HASH. Web roots
-      contain wp-config.php = DB passwords. The script locks the backup folder
-      to Administrators + SYSTEM only. Do not copy it to a share. Use
-      -SkipAdIfm if you do not want hashes on disk at all.
+      The IFM copy contains ntds.dit = every domain password HASH. If Red Team
+      grabs it, that is "recovery of user IDs and passwords from a team system"
+      (a big penalty in most packets), so IFM is OFF unless you pass
+      -IncludeAdIfm. Web roots contain wp-config.php = DB passwords. The script
+      locks the backup folder to Administrators + SYSTEM only. Do not copy it
+      to a share. (-SkipAdIfm is still accepted for old notes; it is now the default.)
 
     WHAT IT READS    registry, Task Scheduler, AD, DNS, IIS config, web roots
     WHAT IT CHANGES  creates C:\ccdc\backups\<stamp>_box\ (and an IIS config backup inside
@@ -45,12 +47,15 @@
 .EXAMPLE
     .\Backup-Box.ps1
 .EXAMPLE
-    .\Backup-Box.ps1 -SkipAdIfm -SkipWebRoots
+    .\Backup-Box.ps1 -SkipWebRoots
+.EXAMPLE
+    .\Backup-Box.ps1 -IncludeAdIfm      # DC: also copy ntds.dit (move it off-box, delete after)
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$Destination,
-    [switch]$SkipAdIfm,
+    [switch]$IncludeAdIfm,
+    [switch]$SkipAdIfm,     # kept for compatibility; IFM is now opt-in via -IncludeAdIfm
     [switch]$SkipWebRoots,
     [string]$ConfigPath
 )
@@ -62,7 +67,7 @@ if (-not $Destination) { $Destination = Join-Path $script:CcdcBackupRoot ("{0}_b
 $isDC = Test-CcdcIsDC
 
 if ($WhatIfPreference) {
-    Write-Finding -Level INFO -Category 'Plan' -Message "WhatIf: would back up to $Destination (registry, tasks, firewall, users$(if ($isDC) { ', AD IFM, GPO, DNS, LDIF' })$(if (Test-Path "$env:windir\System32\inetsrv\appcmd.exe") { ', IIS' }))"
+    Write-Finding -Level INFO -Category 'Plan' -Message "WhatIf: would back up to $Destination (registry, tasks, firewall, users$(if ($isDC) { "$(if ($IncludeAdIfm) { ', AD IFM' }), GPO, DNS, LDIF" })$(if (Test-Path "$env:windir\System32\inetsrv\appcmd.exe") { ', IIS' }))"
     Complete-Ccdc; return
 }
 
@@ -135,14 +140,14 @@ if ($isDC) {
     Write-Section 'Domain controller'
     $domainDN = [string]([ADSI]'LDAP://RootDSE').defaultNamingContext
 
-    if (-not $SkipAdIfm) {
+    if ($IncludeAdIfm -and -not $SkipAdIfm) {
         $ifm = Join-Path $Destination 'ad_ifm'
         Write-Finding -Level YELLOW -Category 'AD' -Message 'Creating IFM (ntds.dit = all password hashes). Folder is ACL-locked; never share it.'
         Step 'AD database (ntdsutil IFM)' {
             $out = & ntdsutil.exe 'activate instance ntds' 'ifm' "create full `"$ifm`"" 'quit' 'quit' 2>&1
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $ifm 'Active Directory\ntds.dit'))) { throw ($out | Select-Object -Last 3) -join ' ' }
         }
-    } else { Write-Finding -Level INFO -Category 'AD' -Message 'AD IFM skipped (-SkipAdIfm)' }
+    } else { Write-Finding -Level INFO -Category 'AD' -Message 'AD IFM (ntds.dit) skipped - pass -IncludeAdIfm to include it. AD objects are still exported as LDIF below.' }
 
     if (Test-CcdcModule GroupPolicy) {
         $gdir = New-SubDir 'gpo'
