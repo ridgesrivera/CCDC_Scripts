@@ -1,0 +1,16 @@
+# Competition-day config copies (IPs only, but keep them out of the repo)
+config/ccdc.json
+
+# Never commit run output, reports, baselines or backups
+logs/
+reports/
+baseline/
+backups/
+scan-*/
+*.log
+
+# Third-party binaries go in tools/ locally but are NOT committed (see tools/README.md)
+tools/bin/
+tools/sysmon/*.exe
+tools/winlogbeat/
+tools/nxlog/
