@@ -63,7 +63,7 @@ Walk through `docs/incident-response.md` scenarios A-C on a planted box and writ
 - IFEO Debugger on `utilman.exe`
 - Defender exclusion for `C:\Windows\Temp`
 - `wp-content\uploads\2024\img.php` containing `eval($_POST['x'])` (a harmless test string is fine)
-- A user whose description is `temp pw: Summer2024!`
+- A user whose description is `temp pw: FakeLabPw-1` (obviously fake; the audit flags the "pw:" pattern)
 - An SPN on a Domain Admin account (`setspn -S http/fake trex\someadmin`)
 
 Remove every plant after the session. `Watch-Changes.ps1` against a pre-plant baseline is a good way to check.
