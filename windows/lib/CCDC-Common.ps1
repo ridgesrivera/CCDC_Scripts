@@ -62,12 +62,12 @@ function Initialize-Ccdc {
         [switch]$ReadOnly
     )
     foreach ($d in @($script:CcdcRoot, $script:CcdcLogRoot)) {
-        if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+        if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force -WhatIf:$false | Out-Null }
     }
     $script:CcdcLogFile = Join-Path $script:CcdcLogRoot ("{0}_{1}_{2}.log" -f $ScriptName, $env:COMPUTERNAME, $script:CcdcStamp)
     $script:CcdcOutFile = $OutFile
 
-    $mode = if ($ReadOnly) { 'READ-ONLY (changes nothing)' } else { 'CHANGES STATE (dry-run with -WhatIf)' }
+    $mode = if ($ReadOnly) { 'READ-ONLY (changes nothing)' } elseif ($WhatIfPreference) { 'DRY RUN (-WhatIf): nothing will change' } else { 'CHANGES STATE (dry-run with -WhatIf)' }
     $line = '=' * 72
     Write-Host ""
     Write-Host $line -ForegroundColor Cyan
@@ -87,13 +87,14 @@ function Write-CcdcLog {
     param([string]$Message, [string]$Level = 'INFO')
     if (-not $script:CcdcLogFile) { return }
     $entry = '{0} [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
-    Add-Content -Path $script:CcdcLogFile -Value $entry -ErrorAction SilentlyContinue
+    # -WhatIf:$false - our own log is not a system change, so it is written even during a dry run.
+    Add-Content -Path $script:CcdcLogFile -Value $entry -ErrorAction SilentlyContinue -WhatIf:$false
 }
 
 function Write-Section {
     param([string]$Title)
     Write-Host ""
-    Write-Host ("--- {0} " -f $Title).PadRight(72, '-') -ForegroundColor Magenta
+    Write-Host (("--- {0} " -f $Title).PadRight(72, '-')) -ForegroundColor Magenta
     Write-CcdcLog "SECTION $Title"
 }
 
@@ -137,12 +138,12 @@ function Complete-Ccdc {
     if ($script:CcdcOutFile) {
         try {
             $parent = Split-Path -Parent $script:CcdcOutFile
-            if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force -WhatIf:$false | Out-Null }
             if ($script:CcdcOutFile -like '*.csv') {
-                $script:CcdcFindings | Export-Csv -Path $script:CcdcOutFile -NoTypeInformation
+                $script:CcdcFindings | Export-Csv -Path $script:CcdcOutFile -NoTypeInformation -WhatIf:$false
             } else {
                 $script:CcdcFindings | Format-Table -AutoSize -Wrap Time, Level, Category, Message, Detail |
-                    Out-String -Width 250 | Out-File -FilePath $script:CcdcOutFile -Encoding UTF8
+                    Out-String -Width 250 | Out-File -FilePath $script:CcdcOutFile -Encoding UTF8 -WhatIf:$false
             }
             Write-Host "  Report: $($script:CcdcOutFile)" -ForegroundColor DarkGray
         } catch { Write-Host "  Could not write report: $_" -ForegroundColor Yellow }
@@ -187,6 +188,13 @@ function Invoke-CcdcChange {
         }
     }
     try {
+        # 'Stop' turns non-terminating cmdlet errors into exceptions so the
+        # catch below sees them. (Native .exe tools never throw - scriptblocks
+        # that call reg.exe / auditpol.exe must check $LASTEXITCODE and throw.)
+        # GOTCHA for authors: the scriptblock runs inside this function, so
+        # variables named $Target/$Action/$Force/$Undo/$Cmdlet/$ScriptBlock
+        # refer to THIS function's parameters. Use other names in callers.
+        $ErrorActionPreference = 'Stop'
         & $ScriptBlock
         Write-Host ("     done: {0} -> {1}" -f $Action, $Target) -ForegroundColor Green
         Write-CcdcLog ("CHANGED {0} on {1}{2}" -f $Action, $Target, $(if ($Undo) { " | UNDO: $Undo" } else { '' })) 'CHANGE'
@@ -201,7 +209,7 @@ function Invoke-CcdcChange {
 function Get-CcdcBackupDir {
     # One backup folder per script run: C:\ccdc\backups\<stamp>\
     $dir = Join-Path $script:CcdcBackupRoot $script:CcdcStamp
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force -WhatIf:$false | Out-Null }
     return $dir
 }
 
@@ -213,8 +221,8 @@ function Backup-CcdcFile {
     $rel  = ($Path -replace ':', '') -replace '^\\+', ''
     $dest = Join-Path (Get-CcdcBackupDir) $rel
     $destParent = Split-Path -Parent $dest
-    if (-not (Test-Path $destParent)) { New-Item -ItemType Directory -Path $destParent -Force | Out-Null }
-    Copy-Item -LiteralPath $Path -Destination $dest -Recurse -Force
+    if (-not (Test-Path $destParent)) { New-Item -ItemType Directory -Path $destParent -Force -WhatIf:$false | Out-Null }
+    Copy-Item -LiteralPath $Path -Destination $dest -Recurse -Force -WhatIf:$false
     Write-CcdcLog "BACKUP $Path -> $dest" 'BACKUP'
     return $dest
 }
