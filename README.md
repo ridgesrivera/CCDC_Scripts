@@ -15,12 +15,19 @@ Every script is meant to be read: each one opens with a header saying **what it'
      [4]  Network exposure    [5] Vuln check       [6] AD + GPO (DC only)
      [P]  Security policy     GPO/AD/DNS settings safe to turn on + where to set them
      [T]  Vendor tool audits  (Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith)
+     [F]  Sensitive files (PII, cards, passwords)   [X] Software / remote-access tool audit
      [A]  Run ALL read-only audits (1-6 + P)  -> C:\ccdc\reports\
      CHANGES THE BOX (dry run offered first)
      [7]  Rotate passwords    [8] Disable accounts [9] Firewall allowlist
      [10] Baseline hardening  [11] IIS / PHP hardening
-     BACKUP / LOGGING / HUNT
-     [B]  Backup   [S] Per-service backup   [L] Setup logging   [W] Watch for changes
+     [12] AD account hardening (DC)   [13] SQL Server hardening
+     [K]  Reset krbtgt (DC)   [D] Disconnect sessions
+     BACKUP / LOGGING
+     [B]  Backup   [S] Per-service backup   [L] Setup logging
+     HUNT / RESPOND  (keep E and C running in their own windows)
+     [W]  Watch for changes (diff vs baseline, or scheduled task)
+     [E]  Watch events live (alerts with source IP)   [C] Check scored services (why is it down?)
+     [R]  Remove persistence (evidence first)         [I] Incident worksheet (source IPs + timeline)
      [H]  Explain a script    [Q] Quit
    ```
 3. Follow [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windows.md).
@@ -79,7 +86,19 @@ legacy/                     v1 scripts, unchanged
 | `harden\Harden-IIS-PHP.ps1` | **Changes** (wp-config only) | Backup IIS/web roots, WP DISALLOW_FILE_EDIT, config ACL checks, WP admins/plugins, MediaWiki/php.ini checks |
 | `backup\Backup-Box.ps1` | Writes backup folder only | Registry, tasks, firewall, users; DC: GPOs, DNS, LDIF (ntds.dit IFM only with `-IncludeAdIfm`); IIS config + web roots |
 | `logging\Setup-Logging.ps1` | **Changes** | Audit policy, log sizes, PowerShell logging, Sysmon (if staged), Winlogbeat/NXLog → Graylog |
-| `hunt\Watch-Changes.ps1` | Read-only (writes snapshots) | Baseline users/groups/tasks/services/ports/Run keys/WMI/shares, then diff every N minutes |
+| `hunt\Watch-Changes.ps1` | Read-only (writes snapshots; `-InstallTask` adds one scheduled task) | Baseline users/groups/tasks/services/ports/Run keys/WMI/shares/firewall rules/Defender exclusions/hosts file/port proxies/SSH keys/IFEO+Winlogon+LSA/software/web script files, and on a DC GPO versions/SPNs/no-preauth/trusts. Diff every N minutes, or `-InstallTask` to run on a schedule and pop a message on RED |
+| `hunt\Watch-Events.ps1` | Read-only | Live event-log alerts: account and group changes, new tasks/services, RDP/SSH logons, password spraying, log clearing, Defender/firewall tampering, web server spawning a shell, DCSync, Zerologon, roasting, GPO edits. Each alert carries the **source IP** of the session that did it |
+| `hunt\Test-ScoredServices.ps1` | Read-only (writes baseline) | For every scored port: listening? right address? service start mode? TCP connect? firewall allow / BLOCK rule? Then HTTP title/defacement/DB-error, DNS answers + zone records vs baseline, LDAP, shares, RDP, sshd config, scored-account lock/password date, and hosts-file / portproxy / IPsec / clock / disk sabotage. `-Loop` for a 60 s watch |
+| `hunt\Remove-Persistence.ps1` | **Changes** | Numbered list of removable persistence (tasks incl. hidden, services, Run keys, startup files, WMI, IFEO, Winlogon, AppInit, LSA packages, Defender exclusions, SSH keys, web shells, PS profiles, port proxies). For each pick: export + hash + creator and source IP → disable/quarantine → evidence record + undo command |
+| `hunt\New-IncidentReport.ps1` | Read-only (writes worksheet) | Ranks candidate attacker IPs for a time window and writes a facts-only worksheet: timeline, what was removed (hashes), toolkit changes, live sessions, IIS requests |
+| `audit\Audit-SensitiveFiles.ps1` | Read-only | SSNs, Luhn-valid card numbers, private keys, password assignments, contact lists, sensitive file names; flags files under web roots / shares or readable by Everyone. Never prints the values |
+| `audit\Audit-Software.ps1` | Read-only | Installed programs, services, processes and dropped files matched against remote-access / attack-tool / junk / outdated lists; writes an inventory CSV with a Decision column for the software and remote-access audit injects |
+| `harden\Harden-AD.ps1` | **Changes** (DC) | Clears no-preauth (AS-REP), reversible encryption, password-not-required and DES-only flags with rollback; reports Kerberoastable accounts, unconstrained delegation, admin group sizes |
+| `harden\Harden-MSSQL.ps1` | **Changes** | Audits sa, sysadmins, blank/guessable SQL passwords, linked servers; turns off xp_cmdshell, Ole Automation, ad hoc queries, CLR (skipped if assemblies exist), remote DAC; `-DisableLogin`, `-RotateLogin` |
+| `harden\Reset-Krbtgt.ps1` | **Changes** (DC) | One krbtgt reset per run with replication check and a minimum wait before the second |
+| `harden\Disconnect-Sessions.ps1` | **Changes** | Lists, then logs off RDP/console, SMB, WinRM and SSH sessions of named users (or everyone but you) |
+
+Shared output folders: `C:\ccdc\alerts\` (one CSV of everything the watchers saw), `C:\ccdc\evidence\` (what was removed), `C:\ccdc\quarantine\` (the files themselves), `C:\ccdc\reports\incidents\`.
 
 ## Linting
 `pwsh -File tools/lint/Test-PsSyntax.ps1 -Path windows` (parse + PS 5.1 compatibility + PSScriptAnalyzer when installed).

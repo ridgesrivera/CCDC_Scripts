@@ -16,7 +16,11 @@ One page, in priority order. Open the panel first:
 | 5 | 9-13 | **Persistence hunt**: tasks, services, Run keys, WMI, sticky keys, SSH keys, web shells | `[3]` `audit\Audit-Persistence.ps1`, then `[10]` `-Only RemoveIfeoDebuggers` | `schtasks /query /fo LIST /v`, `reg query ...\Run` |
 | 6 | 13-15 | **Firewall**: default-deny inbound, allow scored ports, keep your session | `[9]` `harden\Set-Firewall.ps1` (dry run first, test a NEW connection before typing YES) | `netsh advfirewall set allprofiles state on` |
 | + | 15+ | **Security policy scan**: what to turn on in GPO without breaking scoring (do every SAFE item; read Breaks for CAUTION) | `[P]` `audit\Audit-SecurityPolicy.ps1` | [`security-policy-reference.md`](security-policy-reference.md), `gpmc.msc` |
-| + | 15+ | Hardening baseline, logging, then start the watch loop | `[10]` `Harden-Baseline.ps1`, `[L]` `Setup-Logging.ps1`, `[W]` `Watch-Changes.ps1` (baseline, then loop) | see each script's header |
+| + | 10+ | **Save the scored-service baseline while the scoreboard is green**, then leave the loop running | `[C]` `hunt\Test-ScoredServices.ps1 -SaveBaseline`, then `-Loop` in its own window | browse the site, `Test-NetConnection <ip> -Port <p>` |
+| + | 15+ | **Find PII / card data / passwords in files** before Red Team does (first hour) | `[F]` `audit\Audit-SensitiveFiles.ps1` | `dir /s /b C:\*pass* C:\*.sql` |
+| + | 15+ | **DC:** fix roastable / weak account flags. **SQL box:** sa, weak logins, xp_cmdshell | `[12]` `Harden-AD.ps1`, `[13]` `Harden-MSSQL.ps1` | see each script's header |
+| + | 15+ | Live alerts in a second window, all day | `[E]` `hunt\Watch-Events.ps1 -Loop -Beep` (after `[L]` so the audit policy is on) | Event Viewer > Security |
+| + | 15+ | Hardening baseline, logging, then start the watch loop | `[10]` `Harden-Baseline.ps1`, `[L]` `Setup-Logging.ps1`, `[W]` `Watch-Changes.ps1` (baseline, then loop or `-InstallTask`) | see each script's header |
 | + | 20+ | Deep scan with the vendor tools (needs `tools\Get-CcdcTools.ps1 -Verify` first) | `[T]` `Invoke-AuditTools.ps1`: Autoruns, AccessChk, Hayabusa; PingCastle + Locksmith on the DC | `autorunsc64 -a * -s -m`, `PingCastle.exe --healthcheck` |
 
 ## Box-specific first moves (Great Cretaceous)
