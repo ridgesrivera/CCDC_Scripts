@@ -5,7 +5,7 @@
 ## Role
 Domain controller and DNS for the whole pod. If trex is down, domain logins on fossil/fernbank fail, Keycloak federation on hellcreek fails, and name resolution may fail pod-wide.
 
-## Likely scored
+## Services it runs
 DNS (53), LDAP (389/636), Kerberos (88), SMB (445), maybe RDP (3389). Confirm against the packet.
 
 ## Dependencies (don't break these)

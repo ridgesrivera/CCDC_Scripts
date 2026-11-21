@@ -221,7 +221,7 @@ $checks = @(
            $ver = $ex.VersionInfo.ProductVersion
            if ($ex.LastWriteTime -lt [datetime]'2021-03-02') { return (New-Vuln "Exchange build $ver predates March 2021: ProxyLogon + ProxyShell (pre-auth SYSTEM)") }
            if ($ex.LastWriteTime -lt [datetime]'2021-07-13') { return (New-Vuln "Exchange build $ver predates July 2021: ProxyShell (pre-auth SYSTEM)") }
-           New-Risk "Exchange build $ver: confirm it is the latest SU (ProxyNotShell and later)" } }
+           New-Risk "Exchange build ${ver}: confirm it is the latest SU (ProxyNotShell and later)" } }
     @{ Id = 'IPv6RCE'; Cve = 'CVE-2024-38063'; Name = 'IPv6 TCP/IP remote code execution'; Applies = { $X.Build -ge 7601 }; Tokens = @('DisabledComponents')
        Fix = 'Patch (Aug 2024+). Workaround: unbind IPv6 on the NIC if nothing scored uses it'
        Eval = { param($S)
@@ -255,7 +255,7 @@ $checks = @(
        Fix = 'Set Lsa LmCompatibilityLevel=5 (3 minimum) and NoLMHash=1'
        Eval = { param($S)
            $l = Get-SReg $S $P_LSA 'LmCompatibilityLevel'; $n = Get-SReg $S $P_LSA 'NoLMHash'
-           if ($null -ne $l -and [int]$l -lt 3) { return (New-Vuln "LmCompatibilityLevel=$l: LM/NTLMv1 accepted (hashes cracked in minutes)") }
+           if ($null -ne $l -and [int]$l -lt 3) { return (New-Vuln "LmCompatibilityLevel=${l}: LM/NTLMv1 accepted (hashes cracked in minutes)") }
            if ($n -eq 0) { return (New-Vuln 'NoLMHash=0: LM hashes stored for new passwords') }
            New-Ok ("NTLMv2 only (LmCompatibilityLevel={0})" -f $(if ($null -eq $l) { 'default 3' } else { $l })) } }
     @{ Id = 'Poisoning'; Cve = 'creds'; Name = 'LLMNR / NBT-NS poisoning (Responder)'; Applies = { $true }; Tokens = @('EnableMulticast', 'NetbiosOptions')

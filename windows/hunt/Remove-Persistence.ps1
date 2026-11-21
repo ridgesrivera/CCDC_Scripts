@@ -11,8 +11,8 @@
         3. For each one it first saves the evidence (definition, file copy,
            SHA256, timestamps, who created it and from which IP when the event
            log still knows), then contains it, then writes the undo command.
-      Persistence is scored per hour that Red Team keeps access, and you only
-      earn points back if you can PROVE the removal. Step 3 is that proof.
+      Every hour an attacker keeps access matters, and an incident report needs
+      proof of what was found and removed. Step 3 is that proof.
 
     WHAT IT CAN REMOVE                       HOW (default = reversible)
       Scheduled tasks (incl. hidden ones)    export XML, disable (-Delete: unregister)

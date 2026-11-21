@@ -43,7 +43,7 @@ GUI or Server Core, domain controller, member or standalone, any display languag
   START  [0] First 15 minutes (guided)  overview, backup, alerts, audits, baselines
 
   MONITOR   keep these running in their own windows
-   [D]  LIVE ALERTS                   [C]  Scored services
+   [D]  LIVE ALERTS                   [C]  Service health 
    [N]  Who is on this box
 
   SNAPSHOT  what changed, and put it back
@@ -116,7 +116,7 @@ Full checklist: [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windo
 | Key | Script | What it does |
 |---|---|---|
 | D | `alerts\bt-alerts.ps1` | **LIVE ALERTS.** Event-triggered tasks fire within about 1 s on: RDP or untrusted network logon, spraying, Kerberoasting, user/group/password changes, new services and tasks, log clearing, Defender changes, tampering with the alerts. Each alert shows who, source IP/PC, logon type, a plain-English HOW, the attack CHAIN for that IP and DO NOW commands. [`docs/live-alerts.md`](docs/live-alerts.md) |
-| C | `hunt\Test-ScoredServices.ps1` | Every scored port: listening? right address? start mode? connect? firewall? Then HTTP title/defacement/DB errors, DNS vs baseline, LDAP, shares, RDP, sshd, scored-account lockout, hosts/portproxy/IPsec/clock/disk sabotage. Loop mode |
+| C | `hunt\Test-ScoredServices.ps1` | Service health for each port: listening? right address? start mode? connect? firewall? Then HTTP title/defacement/DB errors, DNS vs baseline, LDAP, shares, RDP, sshd, scored-account lockout, hosts/portproxy/IPsec/clock/disk sabotage. Loop mode |
 | N | `alerts\whoshere.ps1` | One screen: sessions, SMB, WinRM, logons, remote connections, odd ports, diff vs baseline |
 
 ### Snapshot
@@ -128,7 +128,7 @@ Full checklist: [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windo
 ### Audit (read-only)
 | Key | Script | What it does |
 |---|---|---|
-| 1 | `recon\Get-BoxOverview.ps1` | OS/build, domain role, IPs, listeners → process, roles, services, hotfixes, likely scored services |
+| 1 | `recon\Get-BoxOverview.ps1` | OS/build, domain role, IPs, listeners → process, roles, services, hotfixes, listening services |
 | 2 | `audit\Audit-Users.ps1` | Privileged groups, pw-never-expires, new accounts, SPNs, AS-REP roastable, passwords in descriptions, adminCount |
 | 3 | `audit\Audit-Persistence.ps1` | Tasks, services, Run keys, startup, WMI, Winlogon, IFEO/sticky keys, AppInit, SSH keys, Defender exclusions, web shells, LSA packages, netsh helpers, hidden tasks, ServiceDll hijacks, PS profiles |
 | 4 | `audit\Audit-Network.ps1` | Connections + process, firewall profiles, any/any rules, SMBv1, SMB signing, shares + ACLs, RDP NLA, WinRM |

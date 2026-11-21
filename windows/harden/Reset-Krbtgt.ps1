@@ -7,8 +7,8 @@
       Every Kerberos ticket in the domain is signed with the krbtgt account's
       key. An attacker who dumped the domain hashes (DCSync, ntds.dit copy,
       Zerologon) can forge tickets for ANY user, forever, no matter how many
-      admin passwords you rotate. That is a "golden ticket", and it is what
-      "domain-wide persistence" cost 1,000 points for at Qualifiers.
+      admin passwords you rotate. That is a "golden ticket": domain-wide
+      persistence that survives every password change except this one.
 
       The only fix is changing the krbtgt key. AD remembers the current AND
       the previous key, so one reset is not enough: the stolen key is still
