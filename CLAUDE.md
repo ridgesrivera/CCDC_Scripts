@@ -7,8 +7,8 @@ competition, and for teaching newer club members. Read `README.md` (hard rules, 
 - **Generic, never tuned to one environment.** No hard-coded IPs, hostnames, domains or account names in
   scripts. Box-specific facts go in `config/*.json` or docs, never in code. Competition environments change
   every event; a script that only works on the practice lab is a bug.
-- **Any Windows box:** Windows PowerShell **5.1** (repo-wide rule) and, for `windows/alerts/`, **4.0+**
-  (Server 2012 R2). No PowerShell 7 syntax (`?.`, `??`, `&&`, `||`, ternary). No external modules at runtime.
+- **Any Windows box:** Windows PowerShell **3.0+** (5.1 recommended; `lib/Compat.ps1` stands in for cmdlets
+  2008 R2 / Win7 lack) and, for `windows/alerts/`, **4.0+** (Server 2012 R2). No PowerShell 7 syntax (`?.`, `??`, `&&`, `||`, ternary). No external modules at runtime.
   GUI and Server Core. Any display language: use audit-subcategory **GUIDs** and **well-known SIDs**,
   never English group or policy names.
 - **Read-only vs change are separate** (see README hard rules 2-6). State-changing scripts support
@@ -30,7 +30,14 @@ install.ps1                  one-line download/installer (irm ... | iex) -> C:\c
 windows/Launch-Toolkit.ps1   the panel: $menu table (Key/Sec/Name/File/RO/Desc) + Get-ScriptParams + Invoke-Entry;
                              status header (Get-AlertStatus), [0] guided first-15 (Invoke-FirstSteps),
                              [D] -> Invoke-LiveAlerts, loops (-Loop) open in a new window (Start-InNewWindow)
-windows/lib/CCDC-Common.ps1  shared helpers for recon/audit/harden/... (NOT used by windows/alerts)
+windows/lib/CCDC-Common.ps1  shared helpers for recon/audit/harden/... (NOT used by windows/alerts): findings, logging,
+                             Invoke-CcdcChange, backups, registry catalog (Get-CcdcRegCatalog), snapshots
+windows/lib/Compat.ps1       stand-ins for Get-NetTCPConnection / Get-NetIPAddress / Get-LocalGroupMember on old Windows
+windows/backup/Snapshot-State.ps1  Take / Compare / Restore. The panel auto-takes ORIGINAL on first run and a snapshot
+                             before every changing entry (except $noAutoSnapshot). Compare attributes each change to
+                             the toolkit by matching CHANGED lines in C:\ccdc\logs (Get-CcdcToolkitChanges).
+windows/audit/Audit-Vulns.ps1  each check = Applies + Eval(param $S) run against live state AND a snapshot. Only read
+                             registry keys that are inside Get-CcdcRegCatalog, or the BEFORE column shows '?'
 windows/alerts/              LIVE ALERTS bundle: standalone on purpose (see below)
 tools/build-alert-paste.py   regenerates windows/alerts/bt-deploy-PASTE.txt
 tools/lint/Test-PsSyntax.ps1 parse + PS 5.1 compatibility lint
@@ -55,6 +62,10 @@ docs/events/                 per-event notes from team packets (box roles, scori
   Do not make it dot-source `CCDC-Common.ps1` or depend on other repo files. Keep it bare-bones and
   low-overhead (no sound, no tray icons, no background loops besides `-Watch`).
 
+## Panel keys (v3.1)
+MONITOR D C N · SNAPSHOT S W U · AUDIT 1-9 E T A · HARDEN 10-17 · RESPOND R O I · BACKUP B K L · 0 guided · ?<key> · H help.
+Docs reference these keys; update README, docs/first-15-minutes-windows.md and docs/events/* when they change.
+
 ## Gotchas already paid for (do not reintroduce)
 - No line in an alert script may start with `'@` (ends the paste here-string). ASCII only. The builder checks.
 - Never name a function after a built-in alias (`h`, `r`, `gc`, `ls`...). `H` broke whoshere once.
@@ -66,6 +77,9 @@ docs/events/                 per-event notes from team packets (box roles, scori
 - `msg.exe` max 255 chars; it doesn't exist on Home editions. `query.exe` same.
 - `Set-Service` doesn't take arrays on 5.1. `Get-FileHash` is 4.0+ (fine).
 - Console QuickEdit freezes `-Watch` on click; it's disabled in-window via SetConsoleMode.
+- `$h1.Keys + $h2.Keys` throws (KeyCollection has no op_Addition). Use `@($h1.Keys) + @($h2.Keys)`.
+- A native argument like `/file:(Join-Path ...)` is passed as TWO arguments. Build the string first: `"/file:$path"`.
+- Aliases beat functions: never name a helper `r`, `h`, `gc`, `gi`, `gp`, `sc`, `ls`.... Check: compare `function` names against `Get-Alias` output.
 - Throttle keys in `alert-state.json` must be cleared by the self-test (regex near the top of bt-selftest.ps1)
   when you add a new throttle prefix.
 
@@ -88,7 +102,8 @@ docs/events/                 per-event notes from team packets (box roles, scori
    event logs (its -Loop mode still works but is not offered by the panel, to avoid two live monitors);
    `N` whoshere = one screen now; `W` Watch-Changes = periodic diff. Consider folding Watch-Events detections
    that bt-alerts lacks (DCSync, Zerologon, GPO edits, web-server-spawns-shell) into bt-alerts as triggers.
-6. `pii-hunt.ps1` overlaps `legacy/05_PIIScanner.ps1` and `audit/Audit-SensitiveFiles.ps1`; panel `F` offers both
-   (deep file scan vs quick hunt incl. SQL Server).
+6. `pii-hunt.ps1` overlaps `audit/Audit-SensitiveFiles.ps1`; panel `8` offers both (deep file scan vs quick hunt incl. SQL Server).
+9. Snapshot restore covers registry/services/users/groups/shares/hosts/Defender/firewall/audit/secpol. Not covered:
+   scheduled tasks and WMI persistence (use `R` Remove-Persistence), IIS/app config (use `K` per-service restore).
 7. Linux equivalents (auditd / journald based), same output format.
 8. Add `tools/lint` coverage for the paste rules (no `'@` lines, ASCII) so CI catches them.

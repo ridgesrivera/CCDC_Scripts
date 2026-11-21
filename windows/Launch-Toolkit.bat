@@ -10,6 +10,15 @@ if %errorlevel% neq 0 (
     powershell.exe -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
+powershell.exe -NoProfile -Command "exit $PSVersionTable.PSVersion.Major" >nul 2>&1
+if %errorlevel% lss 3 (
+    echo.
+    echo  This box has PowerShell 2. The toolkit needs PowerShell 3 or newer.
+    echo  Install WMF 5.1 ^(KB3191566 for 2008 R2 / 7, needs .NET 4.5^) and reboot,
+    echo  or use the manual commands in docs\first-15-minutes-windows.md.
+    pause
+    exit /b 1
+)
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%~dp0..' -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Launch-Toolkit.ps1" %*
 if %errorlevel% neq 0 pause

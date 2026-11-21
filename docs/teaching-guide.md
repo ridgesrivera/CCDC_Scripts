@@ -27,7 +27,7 @@ Before a session, plant a few things for students to find (see "Plant list" at t
 
 ## Session 3: Passwords (30 min)
 - **Manual:** `net user Administrator *` (the `*` prompts, so nothing lands on the command line).
-- **Script:** `[7]` Rotate-Passwords with **dry run** first, then for real on a lab account.
+- **Script:** `[10]` Rotate-Passwords with **dry run** first, then for real on a lab account.
 - **Code:** `New-CcdcPassword`: RNG vs `Get-Random`, rejection sampling, why `$ % ^ &` and quotes are excluded.
 - **Discuss:**
   - Why not `net user bob NewPass123!`? (hint: 4688 command-line logging, process lists)
@@ -37,19 +37,20 @@ Before a session, plant a few things for students to find (see "Plant list" at t
 ## Session 4: Persistence hunt (60 min, the fun one)
 - **Manual:** `schtasks /query /fo LIST /v`, `reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Run`, `Get-WmiObject -Namespace root\subscription -Class __EventConsumer`.
 - **Script:** `[3]` Audit-Persistence on the planted box. Students race to explain every RED.
-- **Demo the sticky-keys backdoor** on a lab VM: set the IFEO Debugger for sethc.exe to cmd.exe, press Shift 5x at the RDP login screen, then remove it with `[10] -Only RemoveIfeoDebuggers`.
+- **Demo the sticky-keys backdoor** on a lab VM: set the IFEO Debugger for sethc.exe to cmd.exe, press Shift 5x at the RDP login screen, then remove it with `[13] -Only RemoveIfeoDebuggers`.
 - **Discuss:** Why does NLA matter for sticky keys? Why remove persistence only after preserving evidence?
 
 ## Session 5: Change control and the firewall (45 min)
 - **Concepts:** `-WhatIf`, per-action confirmation, backups, undo hints in the log. Open a `C:\ccdc\logs\*.log` file and read it together.
 - **Manual:** `netsh advfirewall show allprofiles`, `netsh advfirewall export`.
-- **Script:** `[9]` Set-Firewall. Let it schedule the rollback, *deliberately* don't type YES, and watch it revert.
+- **Script:** `[12]` Set-Firewall. Let it schedule the rollback, *deliberately* don't type YES, and watch it revert.
 - **Discuss:** Why doesn't "default inbound = Block" break the DC? What does `-DisableOtherInboundRules` change?
 
 ## Session 6: Hardening, logging, watch loop (45 min)
-- `[10]` Harden-Baseline module by module: what attack does each one stop? (Responder → LLMNR/NBT-NS, mimikatz → WDigest/LSA protection, PrintNightmare → spooler)
+- `[13]` Harden-Baseline module by module: what attack does each one stop? (Responder → LLMNR/NBT-NS, mimikatz → WDigest/LSA protection, PrintNightmare → spooler)
 - `[L]` Setup-Logging, then generate events (failed logon, new user) and find them in Event Viewer / Graylog.
-- `[W]` Watch-Changes: baseline, add a user, diff.
+- `[W]` → `[5]` change baseline, add a user, `[W]` → `[3]` diff.
+- `[S]` snapshot, turn on WDigest by hand, `[W]` → `[1]` shows it as NOT BY THE TOOLKIT, `[5]` shows WDigest as REGRESSED, `[U]` puts it back.
 
 ## Session 7: Incident response tabletop (45 min)
 Walk through `docs/incident-response.md` scenarios A-C on a planted box and write the incident report using the template.
