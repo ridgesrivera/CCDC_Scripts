@@ -1,20 +1,20 @@
 <#
 .SYNOPSIS
-    Backup-Box - snapshot everything you would need to rebuild/restore this box. Writes ONLY to the backup folder.
+    Backup-Box - back up Active Directory (on a DC) and IIS (on a web server). Writes ONLY to the backup folder.
 
 .DESCRIPTION
     PURPOSE
       Take a known-good copy early (minute 5-10), before you or the Red Team
       break something. Restoring a config file beats rebuilding a service.
 
-    WHAT IT BACKS UP (each part skipped automatically if not present)
-      All boxes : key registry hives (Run keys, Winlogon, IFEO, Services, Lsa, SMB, policies),
-                  scheduled tasks (one XML per task, re-importable), firewall policy (.wfw),
-                  local users/groups list, service list, system info
+    WHAT IT BACKS UP (each part runs only if that role is on this box)
       DC        : AD database via ntdsutil IFM (ntds.dit + SYSTEM hive) ONLY with -IncludeAdIfm,
                   all GPOs (Backup-GPO), DNS zones (dnscmd /ZoneExport),
                   users/groups/OUs as LDIF (ldifde - contains NO passwords)
       IIS       : appcmd config backup + applicationHost.config + every site's web root
+      -Full     : ALSO key registry hives, scheduled tasks (XML), firewall policy, users/services
+                  lists, system info. Not needed normally: the snapshot (panel S) records settings.
+      Other services (SQL, DNS on a non-DC, FTP...): per service, panel P.
 
     !! SENSITIVE OUTPUT !!
       The IFM copy contains ntds.dit = every domain password HASH. If Red Team
@@ -56,6 +56,7 @@ param(
     [switch]$IncludeAdIfm,
     [switch]$SkipAdIfm,     # kept for compatibility; IFM is now opt-in via -IncludeAdIfm
     [switch]$SkipWebRoots,
+    [switch]$Full,
     [string]$ConfigPath
 )
 
@@ -72,7 +73,7 @@ if ($WhatIfPreference) {
 
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 # Lock the folder FIRST so sensitive files are never readable by normal users.
-$null = & icacls.exe $Destination /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' 2>&1
+$null = & icacls.exe $Destination /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' 2>&1   # SIDs: any language
 Write-Finding -Level GREEN -Category 'Backup' -Message "Destination $Destination (ACL: Administrators + SYSTEM only)"
 
 function Step([string]$name, [scriptblock]$sb) {
@@ -82,58 +83,62 @@ function Step([string]$name, [scriptblock]$sb) {
 }
 function New-SubDir([string]$n) { $d = Join-Path $Destination $n; New-Item -ItemType Directory -Path $d -Force | Out-Null; return $d }
 
-# ---------------------------------------------------------------------------
-Write-Section 'System snapshot'
-# ---------------------------------------------------------------------------
-$sys = New-SubDir 'system'
-Step 'systeminfo / ipconfig / netstat' {
-    systeminfo.exe | Out-File (Join-Path $sys 'systeminfo.txt') -Encoding UTF8
-    ipconfig.exe /all | Out-File (Join-Path $sys 'ipconfig.txt') -Encoding UTF8
-    netstat.exe -ano | Out-File (Join-Path $sys 'netstat.txt') -Encoding UTF8
-}
-Step 'services list' { Get-WmiObject Win32_Service | Select-Object Name, DisplayName, State, StartMode, StartName, PathName | Export-Csv (Join-Path $sys 'services.csv') -NoTypeInformation }
-Step 'local users + groups' {
-    Get-WmiObject Win32_UserAccount -Filter 'LocalAccount=True' | Select-Object Name, Disabled, Description, SID | Export-Csv (Join-Path $sys 'local_users.csv') -NoTypeInformation
-    net.exe localgroup Administrators | Out-File (Join-Path $sys 'local_administrators.txt') -Encoding UTF8
-}
-
-# ---------------------------------------------------------------------------
-Write-Section 'Registry'
-# ---------------------------------------------------------------------------
-$reg = New-SubDir 'registry'
-$keys = @(
-    'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-    'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
-    'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon',
-    'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options',
-    'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows',
-    'HKLM\SYSTEM\CurrentControlSet\Services',
-    'HKLM\SYSTEM\CurrentControlSet\Control\Lsa',
-    'HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders',
-    'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server',
-    'HKLM\SOFTWARE\Policies'
-)
-$regOk = 0
-foreach ($k in $keys) {
-    $file = Join-Path $reg (($k -replace '[\\ ]', '_') + '.reg')
-    $null = & reg.exe export $k $file /y 2>&1
-    if ($LASTEXITCODE -eq 0) { $regOk++; Write-CcdcLog "BACKUP registry $k" } else { Write-CcdcLog "BACKUP registry $k not present" }
-}
-Write-Finding -Level GREEN -Category 'Registry' -Message ("{0} registry areas exported (Run keys, Winlogon, IFEO, services, LSA, RDP, policies)" -f $regOk)
-
-# ---------------------------------------------------------------------------
-Write-Section 'Scheduled tasks + firewall'
-# ---------------------------------------------------------------------------
-$tdir = New-SubDir 'scheduled_tasks'
-Step 'scheduled tasks (XML each)' {
-    foreach ($t in (Get-ScheduledTask)) {
-        $safe = (($t.TaskPath + $t.TaskName) -replace '[\\/:*?"<>|]', '_').Trim('_')
-        Export-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-File (Join-Path $tdir "$safe.xml") -Encoding Unicode
+# Generic system backup only with -Full (the snapshot already records these settings).
+if ($Full) {
+    # ---------------------------------------------------------------------------
+    Write-Section 'System snapshot'
+    # ---------------------------------------------------------------------------
+    $sys = New-SubDir 'system'
+    Step 'systeminfo / ipconfig / netstat' {
+        systeminfo.exe | Out-File (Join-Path $sys 'systeminfo.txt') -Encoding UTF8
+        ipconfig.exe /all | Out-File (Join-Path $sys 'ipconfig.txt') -Encoding UTF8
+        netstat.exe -ano | Out-File (Join-Path $sys 'netstat.txt') -Encoding UTF8
     }
-}
-Step 'firewall policy (.wfw)' {
-    $null = & netsh.exe advfirewall export (Join-Path $Destination 'firewall.wfw')
-    if ($LASTEXITCODE -ne 0) { throw 'netsh export failed' }
+    Step 'services list' { Get-WmiObject Win32_Service | Select-Object Name, DisplayName, State, StartMode, StartName, PathName | Export-Csv (Join-Path $sys 'services.csv') -NoTypeInformation }
+    Step 'local users + groups' {
+        Get-WmiObject Win32_UserAccount -Filter 'LocalAccount=True' | Select-Object Name, Disabled, Description, SID | Export-Csv (Join-Path $sys 'local_users.csv') -NoTypeInformation
+        net.exe localgroup Administrators | Out-File (Join-Path $sys 'local_administrators.txt') -Encoding UTF8
+    }
+
+    # ---------------------------------------------------------------------------
+    Write-Section 'Registry'
+    # ---------------------------------------------------------------------------
+    $reg = New-SubDir 'registry'
+    $keys = @(
+        'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+        'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon',
+        'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options',
+        'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows',
+        'HKLM\SYSTEM\CurrentControlSet\Services',
+        'HKLM\SYSTEM\CurrentControlSet\Control\Lsa',
+        'HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders',
+        'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server',
+        'HKLM\SOFTWARE\Policies'
+    )
+    $regOk = 0
+    foreach ($k in $keys) {
+        $file = Join-Path $reg (($k -replace '[\\ ]', '_') + '.reg')
+        $null = & reg.exe export $k $file /y 2>&1
+        if ($LASTEXITCODE -eq 0) { $regOk++; Write-CcdcLog "BACKUP registry $k" } else { Write-CcdcLog "BACKUP registry $k not present" }
+    }
+    Write-Finding -Level GREEN -Category 'Registry' -Message ("{0} registry areas exported (Run keys, Winlogon, IFEO, services, LSA, RDP, policies)" -f $regOk)
+
+    # ---------------------------------------------------------------------------
+    Write-Section 'Scheduled tasks + firewall'
+
+    # ---------------------------------------------------------------------------
+    $tdir = New-SubDir 'scheduled_tasks'
+    Step 'scheduled tasks (XML each)' {
+        foreach ($t in (Get-ScheduledTask)) {
+            $safe = (($t.TaskPath + $t.TaskName) -replace '[\\/:*?"<>|]', '_').Trim('_')
+            Export-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-File (Join-Path $tdir "$safe.xml") -Encoding Unicode
+        }
+    }
+    Step 'firewall policy (.wfw)' {
+        $null = & netsh.exe advfirewall export (Join-Path $Destination 'firewall.wfw')
+        if ($LASTEXITCODE -ne 0) { throw 'netsh export failed' }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -178,6 +183,9 @@ if ($isDC) {
 
 # ---------------------------------------------------------------------------
 $appcmd = "$env:windir\System32\inetsrv\appcmd.exe"
+if (-not $isDC -and -not (Test-Path $appcmd) -and -not $Full) {
+    Write-Finding -Level INFO -Category 'Backup' -Message 'No Active Directory or IIS on this box: nothing to back up here. Settings are in the snapshot (panel S); other services: panel P.'
+}
 if (Test-Path $appcmd) {
     Write-Section 'IIS'
     $idir = New-SubDir 'iis'

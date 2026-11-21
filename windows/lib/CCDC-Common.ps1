@@ -757,3 +757,42 @@ function Test-CcdcRegKeyCaptured {
     }
     return $false
 }
+
+
+# ---------------------------------------------------------------------------
+# Persistence rules shared by audit\Audit-Persistence and hunt\Remove-Persistence,
+# so both flag (and hide) exactly the same things.
+# ---------------------------------------------------------------------------
+# Paths any user can write to: programs should not autostart from here.
+$script:CcdcBadPathRegex = '(?i)\\(Users\\[^\\]+\\(AppData|Downloads|Desktop|Documents)|Users\\Public|ProgramData\\(?!Microsoft)|Windows\\Temp|\\Temp\\|PerfLogs|\$Recycle)'
+# Command lines that are almost always malicious in a task / Run key / service.
+$script:CcdcBadCmdRegex = '(?i)(-enc(odedcommand)?\s|frombase64string|iex\s*\(|invoke-expression|downloadstring|bitsadmin|certutil.+-urlcache|mshta|regsvr32.+/i:http|rundll32.+javascript|\bnc(\.exe)?\s|ncat|socat|powercat|-w(indowstyle)?\s+h(idden)?\b|test-netconnection|invoke-webrequest|\biwr\s|net\.sockets|net\.webclient|https?://|\becho\b.+>)'
+# A script file started from outside Windows / Program Files (also catches C:\ProgramData\Microsoft\...\x.vbs).
+$script:CcdcScriptOutsideRegex = '(?i)(wscript|cscript|powershell|pwsh|cmd)(\.exe)?\b.*\b[A-Z]:\\(?!Windows\\|Program Files)[^"|]+\.(vbs|vbe|js|jse|ps1|bat|cmd|hta|wsf)\b'
+
+function Get-CcdcPersistSeverity([string]$text) {
+    if ($text -match $script:CcdcBadCmdRegex -or $text -match $script:CcdcBadPathRegex -or $text -match $script:CcdcScriptOutsideRegex) { return 'RED' }
+    return 'YELLOW'
+}
+$script:CcdcSigCache = @{}
+function Test-CcdcMsSigned([string]$path) {
+    # True when the file is signed by Microsoft (catalog signatures count). Cached per path.
+    if (-not $path) { return $false }
+    $path = [Environment]::ExpandEnvironmentVariables($path.Trim().Trim('"'))
+    if (-not $script:CcdcSigCache.ContainsKey($path)) {
+        $sig = Get-AuthenticodeSignature -FilePath $path -ErrorAction SilentlyContinue
+        $script:CcdcSigCache[$path] = [bool]($sig -and $sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -match 'O=Microsoft Corporation')
+    }
+    return $script:CcdcSigCache[$path]
+}
+function Test-CcdcTaskIsNoise($Task, [string]$Actions) {
+    # True = a normal task nobody needs to look at: the toolkit's own, Windows' internal
+    # (no command line), or a Microsoft-signed program run normally. Suspicious content is never noise.
+    if ($Task.TaskName -like 'CCDC-*' -or $Task.TaskName -like 'BT-Alert-*') { return $true }
+    if ((Get-CcdcPersistSeverity $Actions) -eq 'RED') { return $false }
+    if (-not $Actions -and $Task.TaskPath -like '\Microsoft\*') { return $true }
+    $exe = @($Task.Actions | Where-Object { $_.Execute } | ForEach-Object { $_.Execute }) | Select-Object -First 1
+    if ($exe -and $exe -notmatch '(?i)\\?(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32)(\.exe)?$' -and (Test-CcdcMsSigned $exe)) { return $true }
+    if ($exe -and $exe -match '(?i)\\?(rundll32|cmd)(\.exe)?$' -and $Task.TaskPath -like '\Microsoft\*' -and $Actions -match '(?i)%(windir|systemroot)%\\system32\\') { return $true }
+    return $false
+}

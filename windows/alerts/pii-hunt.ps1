@@ -48,11 +48,12 @@ $rxMail = '\b[\w.+-]+@[\w-]+\.[\w.]+\b'
 $rxPw   = '(?i)(password|passwd|pwd|cpassword|connectionstring)\s*[=:"]'
 
 Say "`n=== 1. FILES ===" Cyan
+$office = @(); $hits = 0
 foreach ($p in $Paths) {
   if (-not (Test-Path $p)) { continue }
   Get-ChildItem $p -Recurse -File -Include $exts -Force | Where-Object { $_.Length -lt ($MaxMB * 1MB) } | ForEach-Object {
     $f = $_.FullName
-    if ($_.Extension -in ".xlsx",".docx") { Say ("[OFFICE] {0}  (open it: Office files are zipped, regex can't see inside)" -f $f) Yellow; return }
+    if ($_.Extension -in ".xlsx",".docx") { $office += $f; return }   # zipped: listed once at the end
     $text = [IO.File]::ReadAllText($f)
     $cards = @([regex]::Matches($text, $rxCard) | Where-Object { Test-Luhn $_.Value }).Count
     $ssn   = ([regex]::Matches($text, $rxSSN)).Count
@@ -60,12 +61,17 @@ foreach ($p in $Paths) {
     $mail  = ([regex]::Matches($text, $rxMail)).Count
     $pw    = ([regex]::Matches($text, $rxPw)).Count
     if ($cards -or $ssn -or $nid -gt 2 -or $mail -gt 5 -or $pw) {
-      $c = if ($cards -or $ssn) { "Red" } else { "Yellow" }
+      $c = if ($cards -or $ssn) { "Red" } else { "Yellow" }; $hits++
       Say ("{0}`n    cards={1} ssn={2} national-id={3} emails={4} pw-strings={5}  modified={6}" -f $f, $cards, $ssn, $nid, $mail, $pw, $_.LastWriteTime) $c
     }
   }
 }
-Say "`nWeb-reachable? Anything above under C:\inetpub\wwwroot (or htdocs) can be downloaded by anyone." Yellow
+if ($hits -eq 0) { Say "No PII found in files." Green }
+if ($office) {
+  Say ("{0} Office file(s) could not be read automatically (zipped): open the ones that look like customer or HR data. List in {1}" -f $office.Count, $report) Yellow
+  $office | ForEach-Object { "   OFFICE $_" | Out-File $report -Append }
+}
+if ($hits) { Say "Anything above under C:\inetpub\wwwroot (or htdocs) can be downloaded by anyone: move or restrict it." Yellow }
 
 Say "`n=== 2. SMB SHARES ===" Cyan
 Get-SmbShare | Where-Object { $_.Name -notin "IPC$" } | ForEach-Object {

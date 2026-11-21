@@ -54,6 +54,7 @@ $menu = @(
     @{ Key = 'E';  Sec = 'RES'; Name = 'Find attacks (what to do)'; File = 'hunt\Find-Attacks.ps1';       RO = $true;  Desc = 'Reads the logs and names the attack: password guessing on any service, Kerberoasting, AS-REP roasting, DCSync, new admin, PsExec, web shell, credential dumping... with step-by-step response.' }
     @{ Key = 'X';  Sec = 'RES'; Name = 'Kick user / block IP';  File = 'hunt\Kick-Block.ps1';             RO = $false; Desc = 'Log a user off everywhere + disable the account, and/or block an IP in + out. Every action can be undone.' }
     @{ Key = 'R';  Sec = 'RES'; Name = 'Remove persistence';    File = 'hunt\Remove-Persistence.ps1';     RO = $false; Desc = 'Numbered list of tasks, services, Run keys, web shells...: keeps evidence, then disables / quarantines what you pick.' }
+    @{ Key = 'F';  Sec = 'RES'; Name = 'Fix DNS outage';        File = 'hunt\Repair-DNS.ps1';             RO = $false; Desc = 'DNS down? Finds out if it was just turned off or something bigger, tries the standard fixes (each asks first), verifies, and tells you what is left.' }
     @{ Key = 'I';  Sec = 'RES'; Name = 'Incident worksheet';    File = 'hunt\New-IncidentReport.ps1';     RO = $true;  Desc = 'Candidate attacker IPs + timeline + what was removed: the facts for an incident report.' }
     # SNAPSHOT & ROLLBACK
     @{ Key = 'S';  Sec = 'SNP'; Name = 'Take snapshot';         File = 'backup\Snapshot-State.ps1';       RO = $true;  Desc = 'Save the security state now: registry security settings, services, users, admin groups, shares, hosts, Defender, firewall, audit + security policy. The first one is the ORIGINAL.' }
@@ -76,12 +77,12 @@ $menu = @(
     @{ Key = '14'; Sec = 'HAR'; Name = 'SQL Server hardening';  File = 'harden\Harden-MSSQL.ps1';         RO = $false; Desc = 'Audit sa / sysadmins / weak logins, turn off xp_cmdshell and friends.' }
     @{ Key = '15'; Sec = 'HAR'; Name = 'Reset krbtgt (DC)';     File = 'harden\Reset-Krbtgt.ps1';         RO = $false; Desc = 'DC, after a domain compromise (DCSync, ntds.dit stolen): kills golden tickets. Run twice, with a pause.' }
     # BACKUP / LOGGING
-    @{ Key = 'B';  Sec = 'BAK'; Name = 'Backup this box';       File = 'backup\Backup-Box.ps1';           RO = $false; Desc = 'Registry, tasks, firewall; on a DC also GPOs, DNS zones, AD objects; with IIS also IIS config + web roots -> C:\ccdc\backups.' }
+    @{ Key = 'B';  Sec = 'BAK'; Name = 'Backup AD / IIS';       File = 'backup\Backup-Box.ps1';           RO = $false; Desc = 'On a DC: GPOs, DNS zones, AD objects. On a web server: IIS config + web roots. -> C:\ccdc\backups. Other services: P.' }
     @{ Key = 'P';  Sec = 'BAK'; Name = 'Per-service backup';    File = 'services\Invoke-AllServices.ps1'; RO = $false; Desc = 'Detect every service (DNS, IIS, SQL, SMB, FTP, VNC...), back up / verify / restore one service.' }
     @{ Key = 'L';  Sec = 'BAK'; Name = 'Setup logging';         File = 'logging\Setup-Logging.ps1';       RO = $false; Desc = 'Audit policy, PowerShell logging, Sysmon (if staged), forward to a syslog/Graylog server.' }
 )
 # Changing scripts that do NOT get an automatic snapshot first (they do not change settings, or handle it themselves).
-$noAutoSnapshot = @('D', 'U', 'X', 'B', 'P')
+$noAutoSnapshot = @('D', 'U', 'X', 'B', 'P', 'F')
 $sections = @(
     @{ Id = 'MON'; Title = 'MONITOR   keep LIVE ALERTS open in its own window';  Color = 'Red' }
     @{ Id = 'RES'; Title = 'RED TEAM RESPONSE   something is happening';         Color = 'Magenta' }
@@ -196,7 +197,7 @@ function Show-Menu {
     Write-Host '  START  ' -NoNewline -ForegroundColor White
     Write-Host '[0] ' -NoNewline -ForegroundColor Yellow
     Write-Host 'First 15 minutes (guided, zero)' -NoNewline -ForegroundColor Cyan
-    Write-Host '  snapshot, backup, alerts, who is on, users, vulns' -ForegroundColor DarkGray
+    Write-Host '  snapshot, backup, alerts, ports + SSH keys, admins, PII, vulns' -ForegroundColor DarkGray
     foreach ($sec in $sections) {
         Write-Host ''
         Write-Host ("  {0}" -f $sec.Title) -ForegroundColor $sec.Color
@@ -353,6 +354,7 @@ function Invoke-Entry($m) {
     }
     if ($m.Key -in 'S', 'W', 'U') { Invoke-Snapshot $m.Key; return }
     if ($m.Key -eq 'X') { Invoke-KickMenu $path; return }
+    if ($m.Key -eq 'F') { & $path; return }   # outage: no dry run, every fix asks y/N itself
     if ($m.Key -eq '11') { Invoke-FirewallMenu $path; return }
     if ($m.Key -eq '12') { Invoke-WalkthroughMenu $path; return }
     $params = Get-ScriptParams $m.Key
@@ -495,14 +497,15 @@ function Invoke-WalkthroughMenu([string]$path) {
 function Invoke-FirstSteps {
     $dir = '{0}\first15_{1}_{2}' -f $ReportDir, $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
     $cp = @{}; if ($ConfigPath) { $cp.ConfigPath = $ConfigPath }
-    $role = if (Test-CcdcIsDC) { 'domain controller: GPOs, DNS zones and AD objects are included' } elseif (Test-Path "$env:windir\System32\inetsrv\appcmd.exe") { 'IIS found: IIS config + web roots are included' } else { 'registry, tasks, firewall, users' }
+    $role = if (Test-CcdcIsDC) { 'Active Directory: GPOs, DNS zones, AD objects' } elseif (Test-Path "$env:windir\System32\inetsrv\appcmd.exe") { 'IIS: config + web roots' } else { 'no AD or IIS here: nothing to back up' }
     $steps = @(
-        @{ T = 'Snapshot: record how the box is before anyone changes it';        Do = { & (Join-Path $here 'backup\Snapshot-State.ps1') -Mode Take -Label 'first15' @cp } }
-        @{ T = "Backup ($role)";                                                   Do = { & (Join-Path $here 'backup\Backup-Box.ps1') @cp } }
-        @{ T = 'LIVE ALERTS on (opens the watch window; keep it open)';            Do = { Install-LiveAlerts -Quiet } }
-        @{ T = 'Who is on this box: every way in, who is connected now';           Do = { & (Join-Path $here 'alerts\whoshere.ps1') } }
-        @{ T = 'Users & admins: who has admin, risky accounts';                    Do = { & (Join-Path $here 'audit\Audit-Users.ps1') @cp -OutFile (Join-Path $dir 'users.txt') } }
-        @{ T = 'Vulnerability check: what Red Team can walk straight into';        Do = { & (Join-Path $here 'audit\Audit-Vulns.ps1') @cp -OutFile (Join-Path $dir 'vulns.txt') } }
+        @{ T = 'Snapshot: record how the box is before anyone changes it';              Do = { & (Join-Path $here 'backup\Snapshot-State.ps1') -Mode Take -Label 'first15' -Quiet @cp } }
+        @{ T = "Backup ($role)";                                                         Do = { & (Join-Path $here 'backup\Backup-Box.ps1') @cp } }
+        @{ T = 'LIVE ALERTS on (opens the watch window; keep it open)';                  Do = { Install-LiveAlerts -Quiet } }
+        @{ T = 'Ways in, every open port (odd ones flagged), SSH keys, who is on';       Do = { & (Join-Path $here 'alerts\whoshere.ps1') } }
+        @{ T = 'Admin users and risky accounts';                                         Do = { & (Join-Path $here 'audit\Audit-Users.ps1') @cp -OutFile (Join-Path $dir 'users.txt') } }
+        @{ T = 'PII: card numbers, SSNs, passwords in files and SQL Server';             Do = { & (Join-Path $here 'alerts\pii-hunt.ps1') } }
+        @{ T = 'Vulnerability check: what Red Team can walk straight into';              Do = { & (Join-Path $here 'audit\Audit-Vulns.ps1') @cp -OutFile (Join-Path $dir 'vulns.txt') } }
     )
     Write-Host ''
     Write-Host '  FIRST 15 MINUTES - each step asks first; Enter = yes, n = skip.' -ForegroundColor Cyan
