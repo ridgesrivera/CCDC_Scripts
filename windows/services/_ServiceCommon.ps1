@@ -30,6 +30,9 @@
 
 Set-StrictMode -Off
 
+# Compatibility shims for older Windows (netstat / WMI / WinNT stand-ins).
+. (Join-Path $PSScriptRoot '..\lib\Compat.ps1')
+
 # ---------------------------------------------------------------------------
 #  Console helpers
 # ---------------------------------------------------------------------------

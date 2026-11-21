@@ -539,3 +539,221 @@ function Get-CcdcLogonSource {
     $script:CcdcLogonCache[$LogonId] = $result
     return $result
 }
+
+# Compatibility shims for older Windows live in Compat.ps1 (shared with services\).
+. (Join-Path $PSScriptRoot 'Compat.ps1')
+
+# ---------------------------------------------------------------------------
+# Registry reader that keeps the value TYPE, so a value can be written back
+# exactly as it was (Snapshot-State restore, Audit-Vulns comparisons).
+# Key ids look like 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa'.
+# ---------------------------------------------------------------------------
+function ConvertTo-CcdcRegData {
+    param($Data, [string]$Kind)
+    if ($null -eq $Data) { return $null }
+    switch ($Kind) {
+        'Binary'      { return [Convert]::ToBase64String([byte[]]$Data) }
+        'MultiString' { return @([string[]]$Data) }
+        'DWord'       { return [int]$Data }
+        'QWord'       { return [long]$Data }
+        default       { return [string]$Data }
+    }
+}
+
+function Open-CcdcRegKey {
+    # Returns a read-only RegistryKey (64-bit view) or $null. Caller must Close() it.
+    param([Parameter(Mandatory = $true)][string]$KeyId, [switch]$Writable)
+    $parts = $KeyId -split '\\', 2
+    $hive = switch ($parts[0]) { 'HKLM' { 'LocalMachine' } 'HKCU' { 'CurrentUser' } 'HKU' { 'Users' } default { $null } }
+    if (-not $hive) { return $null }
+    try {
+        $view = if ([Environment]::Is64BitOperatingSystem) { [Microsoft.Win32.RegistryView]::Registry64 } else { [Microsoft.Win32.RegistryView]::Default }
+        $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::$hive, $view)
+        if ($parts.Count -lt 2 -or -not $parts[1]) { return $base }
+        if ($Writable) { return $base.CreateSubKey($parts[1]) }
+        return $base.OpenSubKey($parts[1], $false)
+    } catch { return $null }
+}
+
+function Read-CcdcRegValue {
+    # @{ Type = 'DWord'; Data = 1 } or $null when the value (or key) does not exist.
+    param([Parameter(Mandatory = $true)][string]$KeyId, [Parameter(Mandatory = $true)][string]$Name)
+    $k = Open-CcdcRegKey -KeyId $KeyId
+    if (-not $k) { return $null }
+    try {
+        $vn = if ($Name -eq '(default)') { '' } else { $Name }
+        if (@($k.GetValueNames()) -notcontains $vn) { return $null }
+        $kind = [string]$k.GetValueKind($vn)
+        $raw = $k.GetValue($vn, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        return @{ Type = $kind; Data = (ConvertTo-CcdcRegData -Data $raw -Kind $kind) }
+    } catch { return $null } finally { $k.Close() }
+}
+
+# The registry areas that decide how attackable a Windows box is. Snapshot-State
+# saves every value under these keys; Audit-Vulns reads the same keys, so a vuln
+# check can be evaluated against "now" AND against any snapshot.
+# Depth = how many levels of subkeys to include. Only = keep just these value names.
+# Values named in $script:CcdcRegNeverSave are never written to disk (secrets).
+$script:CcdcRegNeverSave = @('DefaultPassword', 'AutoAdminLogonPassword', 'AltDefaultPassword')
+function Get-CcdcRegCatalog {
+    return @(
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa'; Depth = 1 }                       # NTLM, LM hash, anonymous, RunAsPPL, packages, MSV1_0, Kerberos
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest'; Depth = 0 }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols'; Depth = 2 }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server'; Depth = 0 }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'; Depth = 0 }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg'; Depth = 0 }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters'; Depth = 0 }  # SMB1, signing, null sessions, compression
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters'; Depth = 0 }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\mrxsmb10'; Depth = 0; Only = @('Start') }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters'; Depth = 0 }      # Zerologon enforcement
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters'; Depth = 0 }          # LDAP signing / channel binding
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\Kdc'; Depth = 0 }                      # cert binding (Certifried)
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\DNS\Parameters'; Depth = 0 }           # SIGRed workaround
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\NetBT\Parameters'; Depth = 2 }         # NBT-NS per interface
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters'; Depth = 0; Only = @('DisabledComponents') }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Security'; Depth = 0; Only = @('MaxSize', 'Retention') }
+        @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\EventLog\System'; Depth = 0; Only = @('MaxSize', 'Retention') }
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; Depth = 0 }  # UAC, LocalAccountTokenFilterPolicy
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'; Depth = 0 }      # Shell, Userinit, AutoAdminLogon
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows'; Depth = 0; Only = @('AppInit_DLLs', 'LoadAppInit_DLLs', 'RequireSignedAppInit_DLLs') }
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options'; Depth = 1; Only = @('Debugger', 'GlobalFlag', 'VerifierDlls') }
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'; Depth = 0 }
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'; Depth = 0 }
+        @{ Key = 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'; Depth = 0 }
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Printers'; Depth = 1 }            # Point and Print
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'; Depth = 0 }           # LLMNR
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'; Depth = 0 }
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell'; Depth = 1 }             # script block / module logging, transcription
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer'; Depth = 0 }              # AlwaysInstallElevated
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WinRM'; Depth = 1 }
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender'; Depth = 1 }
+        @{ Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'; Depth = 1 }
+        @{ Key = 'HKLM\SOFTWARE\Microsoft\Policies\LAPS'; Depth = 0 }
+        @{ Key = 'HKLM\SOFTWARE\Classes\ms-msdt'; Depth = 0 }                                   # Follina handler present?
+    )
+}
+
+function Get-CcdcRegTree {
+    # Reads one catalog entry. Returns @{ Keys = @(key ids seen); Values = @{ 'key|name' = @{Type;Data} } }
+    param([Parameter(Mandatory = $true)][string]$KeyId, [int]$Depth = 0, [string[]]$Only = @())
+    $out = @{ Keys = @($KeyId); Values = @{} }
+    $k = Open-CcdcRegKey -KeyId $KeyId
+    if (-not $k) { return $out }
+    try {
+        foreach ($vn in $k.GetValueNames()) {
+            $name = if ($vn -eq '') { '(default)' } else { $vn }
+            if ($Only.Count -and $Only -notcontains $name) { continue }
+            if ($script:CcdcRegNeverSave -contains $name) { $out.Values["$KeyId|$name"] = @{ Type = 'Secret'; Data = '(present, not saved)' }; continue }
+            try {
+                $kind = [string]$k.GetValueKind($vn)
+                $raw = $k.GetValue($vn, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                $out.Values["$KeyId|$name"] = @{ Type = $kind; Data = (ConvertTo-CcdcRegData -Data $raw -Kind $kind) }
+            } catch { $null = $_ }
+        }
+        if ($Depth -gt 0) {
+            foreach ($sub in $k.GetSubKeyNames()) {
+                $child = Get-CcdcRegTree -KeyId "$KeyId\$sub" -Depth ($Depth - 1) -Only $Only
+                $out.Keys += $child.Keys
+                foreach ($e in $child.Values.GetEnumerator()) { $out.Values[$e.Key] = $e.Value }
+            }
+        }
+    } catch { $null = $_ } finally { $k.Close() }
+    return $out
+}
+
+# ---------------------------------------------------------------------------
+# Snapshots: C:\ccdc\snapshots\<HOST>\<yyyyMMdd_HHmmss>_<label>\state.xml
+# The OLDEST one is the "original" (how the box was when we got here).
+# ---------------------------------------------------------------------------
+$script:CcdcSnapshotRoot = Join-Path (Join-Path $script:CcdcRoot 'snapshots') $env:COMPUTERNAME
+
+function Get-CcdcSnapshotList {
+    # Oldest first. Each item: Path, Name, Time, Label.
+    if (-not (Test-Path $script:CcdcSnapshotRoot)) { return @() }
+    return @(Get-ChildItem $script:CcdcSnapshotRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName 'state.xml') } | Sort-Object Name | ForEach-Object {
+            $t = $null; try { $t = [datetime]::ParseExact($_.Name.Substring(0, 15), 'yyyyMMdd_HHmmss', $null) } catch { $null = $_ }
+            [pscustomobject]@{ Path = $_.FullName; Name = $_.Name; Time = $t; Label = $(if ($_.Name.Length -gt 16) { $_.Name.Substring(16) } else { '' }) }
+        })
+}
+
+function Import-CcdcSnapshot {
+    # 'original' (oldest), 'latest', a folder name, or a full path. $null if none.
+    param([string]$Which = 'original')
+    $list = Get-CcdcSnapshotList
+    if ($list.Count -eq 0) { return $null }
+    $pick = switch ($Which) {
+        'original' { $list[0] }
+        'latest'   { $list[-1] }
+        default    { $list | Where-Object { $_.Name -eq $Which -or $_.Path -eq $Which } | Select-Object -First 1 }
+    }
+    if (-not $pick) { return $null }
+    try {
+        $s = Import-Clixml (Join-Path $pick.Path 'state.xml')
+        $s['Dir'] = $pick.Path
+        return $s
+    } catch { return $null }
+}
+
+function Get-CcdcToolkitChanges {
+    # Every CHANGED line the toolkit logged since $Since: Time, Script, Text.
+    # Used to tell "the toolkit did this" apart from "someone else did this".
+    param([datetime]$Since = [datetime]::MinValue)
+    $out = @()
+    foreach ($f in (Get-ChildItem $script:CcdcLogRoot -Filter '*.log' -ErrorAction SilentlyContinue)) {
+        $scr = ($f.BaseName -split "_")[0]
+        foreach ($line in (Get-Content $f.FullName -ErrorAction SilentlyContinue)) {
+            if ($line -notmatch '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \[CHANGE\] (.*)$') { continue }
+            $t = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
+            if ($t -lt $Since) { continue }
+            $out += [pscustomobject]@{ Time = $t; Script = $scr; Text = $Matches[2] }
+        }
+    }
+    return @($out | Sort-Object Time)
+}
+
+function Get-CcdcExtraFacts {
+    # Security facts that are not a single registry value. Saved in every
+    # snapshot and read live by Audit-Vulns, so both sides compare the same thing.
+    $x = @{}
+    $smb = $null
+    if (Get-Command Get-SmbServerConfiguration -ErrorAction SilentlyContinue) {
+        try { $smb = [bool](Get-SmbServerConfiguration -ErrorAction Stop).EnableSMB1Protocol } catch { $null = $_ }
+    }
+    if ($null -eq $smb) {
+        # Older Windows: SMB1 server is on unless LanmanServer\Parameters\SMB1 = 0.
+        $v = Read-CcdcRegValue -KeyId 'HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'SMB1'
+        $smb = -not ($v -and [int]$v.Data -eq 0)
+    }
+    $x.Smb1Server = $smb
+    # HiveNightmare: can BUILTIN\Users (S-1-5-32-545) read the SAM hive file?
+    $x.SamUsersRead = $null
+    try {
+        $acl = Get-Acl -Path "$env:windir\System32\config\SAM" -ErrorAction Stop
+        $x.SamUsersRead = $false
+        foreach ($a in $acl.Access) {
+            if ($a.AccessControlType -ne 'Allow') { continue }
+            if (-not ($a.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData)) { continue }
+            try { $sid = $a.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $sid = '' }
+            if ($sid -eq 'S-1-5-32-545') { $x.SamUsersRead = $true }
+        }
+    } catch { $null = $_ }
+    $x.ShadowCopies = @(Get-WmiObject Win32_ShadowCopy -ErrorAction SilentlyContinue).Count
+    return $x
+}
+
+function Test-CcdcRegKeyCaptured {
+    # Was this key inside what a snapshot captured? True when the key itself was
+    # seen, or when it sits under a catalog root the snapshot read (the subkey
+    # simply did not exist yet, so every value in it counts as "not set").
+    param($RegKeys, [Parameter(Mandatory = $true)][string]$KeyId)
+    if (@($RegKeys) -contains $KeyId) { return $true }
+    foreach ($c in (Get-CcdcRegCatalog)) {
+        if ($KeyId.StartsWith($c.Key + '\', [StringComparison]::OrdinalIgnoreCase) -and @($RegKeys) -contains $c.Key) {
+            $extra = ($KeyId.Substring($c.Key.Length + 1) -split '\\').Count
+            if ($extra -le $c.Depth) { return $true }
+        }
+    }
+    return $false
+}

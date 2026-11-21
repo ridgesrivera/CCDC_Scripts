@@ -1,7 +1,7 @@
 # Security policy reference: AD, DNS and Windows hardening settings
 
 Generated from `windows\audit\Audit-SecurityPolicy.ps1 -Reference` - edit the script, not this file.
-Run the script (panel `[P]`) to see the CURRENT value of each setting on a box.
+Run the script (panel `[7]`) to see the CURRENT value of each setting on a box.
 
 **Safety:** `SAFE` = turn it on now, no effect on scored services in a normal pod. `CAUTION` = can break the thing named in "Breaks"; test first. `LEAVE` = do not change mid-competition.
 

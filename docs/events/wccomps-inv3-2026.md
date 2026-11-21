@@ -20,7 +20,7 @@ here is in the code. This page only says which panel options matter most for thi
 **1. Scoring traffic comes from outside the NAT.**
 Scored connections arrive from the scoring engine's address, not from `192.168.220.x`. So:
 - In LIVE ALERTS, the scorer shows up as an "untrusted network logon". Check it's the scoring engine (it logs in to scored accounts on a steady 2-4 minute rhythm), then **`D` → `3` Trust** it on every box so it stops paging you.
-- The firewall allowlist (`9`) already keeps scored ports open to **any** source. Keep it that way. Admin ports (RDP/WinRM) are limited to this subnet plus your live session. If teammates come in over the NetBird VPN from another address, run `N` (who is on this box) to see their IP, then add it as an admin source.
+- The firewall allowlist (`12`) already keeps scored ports open to **any** source. Keep it that way. Admin ports (RDP/WinRM) are limited to this subnet plus your live session. If teammates come in over the NetBird VPN from another address, run `N` (who is on this box) to see their IP, then add it as an admin source.
 
 **2. Down time is expensive. Watch services continuously.**
 Run `C` in loop mode (new window) on both Windows boxes once the scoreboard is green, and save the baseline first (`C` → `3`). It says *why* a service is down (stopped, wrong bind address, firewall rule, defaced page, DB error).
@@ -28,30 +28,30 @@ Run `C` in loop mode (new window) on both Windows boxes once the scoreboard is g
 **3. The penalties tell us what to protect.**
 | Red Team action | Points | Toolkit |
 |---|---|---|
-| Admin on a box | -100 | `D` alerts, `7` rotate, `O` kick sessions, `R` remove persistence |
-| User/password dump (SAM, AD hashes) | -50 | DC: `6` (DCSync holders), `12` Harden-AD, `5` vulns (Zerologon, NoPAC). Alerts flag Kerberoasting |
-| Customer PII (name + address + card) | **-200** | `F` on the food-ordering box, both modes (files, and SQL Server if present) |
-| Credit card numbers | -50 | `F` (Luhn-checked) |
-| Sensitive files / config | -25 | `F`, `11` (config file permissions) |
+| Admin on a box | -100 | `D` alerts, `10` rotate, `O` kick sessions, `R` remove persistence |
+| User/password dump (SAM, AD hashes) | -50 | DC: `6` (DCSync holders), `15` Harden-AD, `5` vulns (Zerologon, NoPAC). Alerts flag Kerberoasting |
+| Customer PII (name + address + card) | **-200** | `8` on the food-ordering box, both modes (files, and SQL Server if present) |
+| Credit card numbers | -50 | `8` (Luhn-checked) |
+| Sensitive files / config | -25 | `8`, `14` (config file permissions) |
 
 **4. Incident reports earn points back.** File them in the ticket portal with detail. Use `D` → `5` (story of an IP), `I` (incident worksheet), and the evidence records from `R`.
 
-**5. Injects: you write them.** The packet says AI-generated inject text scores **zero**. Toolkit output (reports, CSVs, screenshots) is fine as evidence. The prose must be your own. Injects must be PDFs named like `inject04_team13.pdf`. `X` (software audit) gives a CSV that helps with "inventory" style injects.
+**5. Injects: you write them.** The packet says AI-generated inject text scores **zero**. Toolkit output (reports, CSVs, screenshots) is fine as evidence. The prose must be your own. Injects must be PDFs named like `inject04_team13.pdf`. `9` (software audit) gives a CSV that helps with "inventory" style injects.
 
 ## Per-role plan
 
 ### Active Directory box (Server 2019)
 1. `0` guided run: alerts on, backup (GPOs, DNS, LDIF), baselines.
-2. `6` AD + GPO and `P` security policy. Then `12` Harden-AD (pre-auth, reversible encryption).
-3. `7` rotate **Domain Admins** first. **Careful:** the Linux boxes (Gitea, help site, ticketing) may authenticate against AD with a bind/service account. Rotating it breaks their scored logins. Find bind accounts in `2` (service-looking names, SPNs) and leave them until you know what uses them.
+2. `6` AD + GPO and `7` security policy. Then `15` Harden-AD (pre-auth, reversible encryption).
+3. `10` rotate **Domain Admins** first. **Careful:** the Linux boxes (Gitea, help site, ticketing) may authenticate against AD with a bind/service account. Rotating it breaks their scored logins. Find bind accounts in `2` (service-looking names, SPNs) and leave them until you know what uses them.
 4. Keep DNS healthy: it's almost certainly scored, and every other box depends on it. `C` checks DNS answers against the baseline.
-5. If the domain was compromised: `K` reset krbtgt (twice, with the enforced wait).
+5. If the domain was compromised: `17` reset krbtgt (twice, with the enforced wait).
 
 ### Food ordering box (Server 2022)
 1. `0` guided run. `1` overview shows what the app is (IIS? another web server? which database?).
-2. `S` → `2` per-service backup **before** touching the app (IIS config, web root, database dump).
-3. `F` PII hunt: this box most likely holds customer orders, names, addresses and cards.
-4. `11` IIS/PHP hardening if IIS. `13` SQL hardening if SQL Server (sa, xp_cmdshell). MySQL: `services\MySQL.ps1`.
+2. `K` → `2` per-service backup **before** touching the app (IIS config, web root, database dump).
+3. `8` PII hunt: this box most likely holds customer orders, names, addresses and cards.
+4. `14` IIS/PHP hardening if IIS. `16` SQL hardening if SQL Server (sa, xp_cmdshell). MySQL: `services\MySQL.ps1`.
 5. `C` loop with the site URL. It catches defacement and "database connection error" pages.
 
 ## Timeline reminders

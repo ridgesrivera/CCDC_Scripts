@@ -37,7 +37,7 @@ param(
 
 $logDir = 'C:\ccdc\logs'; New-Item -ItemType Directory $logDir -Force | Out-Null
 $log = Join-Path $logDir "Services_$($Action)_$(Get-Date -Format yyyyMMdd_HHmmss).log"
-Start-Transcript -Path $log -Force | Out-Null
+# No Start-Transcript: a transcript would write anything printed on screen to disk (toolkit rule).
 
 # Order matters a little: identity + firewall first, big file copies last.
 $order = 'ActiveDirectory', 'DNS', 'DHCP', 'GroupPolicy', 'ADCS', 'WindowsFirewall', 'ScheduledTasks', 'RDP', 'WinRM', 'OpenSSH', 'SNMP', 'W32Time',
@@ -103,5 +103,5 @@ if ($Action -eq 'Verify') {
 
 # The per-script timing table only means something when scripts did real work.
 if ($Action -ne 'Detect') { $results | Format-Table -AutoSize | Out-String | Write-Host }
-Stop-Transcript | Out-Null
-Write-Host "  Full log: $log" -ForegroundColor DarkGray
+$results | Format-Table -AutoSize | Out-String -Width 200 | Out-File -FilePath $log -Encoding UTF8
+Write-Host "  Summary log: $log" -ForegroundColor DarkGray

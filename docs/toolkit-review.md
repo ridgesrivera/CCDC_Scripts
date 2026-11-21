@@ -43,10 +43,10 @@ Stopgap: `tools\Get-CcdcTools.ps1 -IncludeLinux` stages pspy + Lynis to copy ove
 
 **Fixed:** `MySQL.ps1` put the DB password on the `mysql`/`mysqldump` command line. That's visible in process lists and logged in event 4688,
 which `Setup-Logging` turns on. It now uses the `MYSQL_PWD` environment variable of the script's own process.
-Known: `Invoke-AllServices` uses `Start-Transcript` (README rule 3 says not to). None of the service scripts print secrets today, but keep it that way.
+**Fixed (2026-11-21):** `Invoke-AllServices` no longer uses `Start-Transcript`; it writes only its summary table to the log.
 
-### `legacy\`
-Keep for reference only. Still worth porting: `Invoke-ThreatMonitor` (real-time event-log alerting; v2 only diffs state every N minutes) and the ADS scan from `06_HiddenFiles`.
+### `legacy\` (removed 2026-11-21)
+The v1 scripts were removed; real-time alerting is now `windows\alerts`. They are still in git history (`git show 371e3c5:legacy/`).
 
 ## Third-party tools
 See [`tools/README.md`](../tools/README.md). Short version: **stage** Sysinternals (Autoruns/Sigcheck/AccessChk), Sysmon, PingCastle, Locksmith and Hayabusa.
