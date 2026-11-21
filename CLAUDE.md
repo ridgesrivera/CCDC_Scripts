@@ -63,7 +63,7 @@ docs/events/                 per-event notes from team packets (box roles, scori
   low-overhead (no sound, no tray icons, no background loops besides `-Watch`).
 
 ## Panel keys (v3.1)
-MONITOR D C N · SNAPSHOT S W U · AUDIT 1-9 E T A · HARDEN 10-17 · RESPOND R O I · BACKUP B K L · 0 guided · ?<key> · H help.
+MONITOR D C N · SNAPSHOT S W U · AUDIT 1-9 E T A · HARDEN 10-17 · RESPOND R X I · BACKUP B K L · 0 guided · ?<key> · H help.
 Docs reference these keys; update README, docs/first-15-minutes-windows.md and docs/events/* when they change.
 
 ## Gotchas already paid for (do not reintroduce)

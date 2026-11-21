@@ -78,7 +78,7 @@ $menu = @(
     @{ Key = '17'; Sec = 'HAR'; Name = 'Reset krbtgt (DC)';     File = 'harden\Reset-Krbtgt.ps1';         RO = $false; Desc = 'DC: kill golden tickets after a domain compromise (run twice, with a pause).' }
     # RESPOND
     @{ Key = 'R';  Sec = 'RES'; Name = 'Remove persistence';    File = 'hunt\Remove-Persistence.ps1';     RO = $false; Desc = 'Numbered list: preserve evidence first, then disable / quarantine what you pick.' }
-    @{ Key = 'O';  Sec = 'RES'; Name = 'Log off sessions';      File = 'harden\Disconnect-Sessions.ps1';  RO = $false; Desc = 'List / log off RDP, SMB, WinRM, SSH sessions (do it right after a password change).' }
+    @{ Key = 'X';  Sec = 'RES'; Name = 'Log off sessions';      File = 'harden\Disconnect-Sessions.ps1';  RO = $false; Desc = 'List / log off RDP, SMB, WinRM, SSH sessions (do it right after a password change).' }
     @{ Key = 'I';  Sec = 'RES'; Name = 'Incident worksheet';    File = 'hunt\New-IncidentReport.ps1';     RO = $true;  Desc = 'Candidate attacker IPs + timeline + what was removed: facts for the incident report ticket.' }
     # BACKUP / LOGGING
     @{ Key = 'B';  Sec = 'BAK'; Name = 'Backup this box';       File = 'backup\Backup-Box.ps1';           RO = $false; Desc = 'Registry, tasks, firewall, AD/GPO/DNS (DC), IIS -> C:\ccdc\backups.' }
@@ -86,7 +86,7 @@ $menu = @(
     @{ Key = 'L';  Sec = 'BAK'; Name = 'Setup logging';         File = 'logging\Setup-Logging.ps1';       RO = $false; Desc = 'Audit policy, PowerShell logging, Sysmon (if staged), forward to a syslog/Graylog server.' }
 )
 # Changing scripts that do NOT get an automatic snapshot first (they do not change settings, or handle it themselves).
-$noAutoSnapshot = @('D', 'U', 'O', 'B', 'K')
+$noAutoSnapshot = @('D', 'U', 'X', 'B', 'K')
 $sections = @(
     @{ Id = 'MON'; Title = 'MONITOR   keep these running in their own windows'; Color = 'Red' }
     @{ Id = 'SNP'; Title = 'SNAPSHOT  what changed, and put it back';           Color = 'Cyan' }
@@ -200,7 +200,7 @@ function Show-Menu {
     Show-Header
     Write-Host '  START  ' -NoNewline -ForegroundColor White
     Write-Host '[0] ' -NoNewline -ForegroundColor Yellow
-    Write-Host 'First 15 minutes (guided)' -NoNewline -ForegroundColor Cyan
+    Write-Host 'First 15 minutes (guided, zero)' -NoNewline -ForegroundColor Cyan
     Write-Host '  overview, backup, alerts, audits, baselines' -ForegroundColor DarkGray
     foreach ($sec in $sections) {
         Write-Host ''
@@ -297,7 +297,7 @@ function Get-ScriptParams([string]$key) {
             if (Read-YesNo 'Also list lower-confidence (YELLOW) items?' $false) { $p.MinLevel = 'YELLOW' }
             if (Read-YesNo 'DELETE tasks/services instead of disabling them?' $false) { $p.Delete = $true }
         }
-        'O' {
+        'X' {
             $u = Read-List 'Users to log off (Enter = just list sessions; type ALL for everyone but you)'
             if ($u -and $u[0] -ieq 'ALL') { $p.AllOthers = $true } elseif ($u) { $p.User = $u }
         }
@@ -388,6 +388,7 @@ function Invoke-Entry($m) {
     $params = Get-ScriptParams $m.Key
     if ($null -eq $params) { Write-Host '  Cancelled.' -ForegroundColor DarkGray; return }
     if ($m.Key -eq 'N') { $params.Remove('ConfigPath') }   # standalone bundle script, no config
+    if ($m.Key -eq 'X' -and -not $params.User -and -not $params.AllOthers) { & $path @params; return }   # nobody named: just list
 
     # Loops go to their own window so the panel stays free.
     if ($params.Loop) {
@@ -503,7 +504,7 @@ function Invoke-FirstSteps {
     Write-Host ''
     Write-Host '  Done. Next, by hand (each needs a decision):' -ForegroundColor Green
     Write-Host '    [10] rotate passwords  (scored accounts: Password Change Request first)' -ForegroundColor Gray
-    Write-Host '    [O]  log off old sessions right after rotating' -ForegroundColor Gray
+    Write-Host '    [X]  log off old sessions right after rotating' -ForegroundColor Gray
     Write-Host '    [12] firewall allowlist (scored ports stay open to any source)' -ForegroundColor Gray
     Write-Host '    [13] baseline hardening, [L] logging, then keep [C] looping in its own window' -ForegroundColor Gray
     Write-Host '    Each change gets a snapshot first. Broke something? W shows what changed, U puts it back.' -ForegroundColor Gray

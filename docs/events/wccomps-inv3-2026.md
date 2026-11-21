@@ -28,7 +28,7 @@ Run `C` in loop mode (new window) on both Windows boxes once the scoreboard is g
 **3. The penalties tell us what to protect.**
 | Red Team action | Points | Toolkit |
 |---|---|---|
-| Admin on a box | -100 | `D` alerts, `10` rotate, `O` kick sessions, `R` remove persistence |
+| Admin on a box | -100 | `D` alerts, `10` rotate, `X` kick sessions, `R` remove persistence |
 | User/password dump (SAM, AD hashes) | -50 | DC: `6` (DCSync holders), `15` Harden-AD, `5` vulns (Zerologon, NoPAC). Alerts flag Kerberoasting |
 | Customer PII (name + address + card) | **-200** | `8` on the food-ordering box, both modes (files, and SQL Server if present) |
 | Credit card numbers | -50 | `8` (Luhn-checked) |

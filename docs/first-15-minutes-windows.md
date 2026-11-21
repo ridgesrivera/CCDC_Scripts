@@ -18,7 +18,7 @@ No copy on the box yet? Admin PowerShell: `irm https://raw.githubusercontent.com
 | 0 | 0-1 | Know the box: role, IPs, what's listening, what's scored | `[1]` | `hostname`, `ipconfig`, `netstat -ano \| findstr LISTEN` |
 | 1 | 1-2 | **Turn on live alerts** so you see Red Team the moment they act. Read the backfill's PRIVILEGED GROUP CHANGES first | `[D]` → `[1]` (or paste `windows\alerts\bt-deploy-PASTE.txt`) | Event Viewer → Security, filter 4624 / 4720 / 4728 / 4732 |
 | 2 | 2-4 | **Vulnerability check**: what can Red Team walk straight into (Zerologon, PrintNightmare, EternalBlue, relay, cleartext creds) | `[5]` | see the script header for the registry keys |
-| 3 | 4-7 | **Rotate admin creds** (Administrator, Domain Admins). Exclude scored accounts. Write new passwords on paper. Then kick old sessions | `[10]`, then `[O]` | `net user Administrator *` |
+| 3 | 4-7 | **Rotate admin creds** (Administrator, Domain Admins). Exclude scored accounts. Write new passwords on paper. Then kick old sessions | `[10]`, then `[X]` | `net user Administrator *` |
 | 4 | 7-8 | **Audit admins, disable rogue ones** | `[2]` → `[11]` | `net localgroup administrators`, `net user x /active:no` |
 | 5 | 8-9 | **Back up** before you (or Red Team) break something | `[B]`, and `[K]` → `[2]` per service | `reg export`, `Backup-GPO -All`, `appcmd add backup` |
 | 6 | 9-12 | **Persistence hunt**: tasks, services, Run keys, WMI, sticky keys, SSH keys, web shells. Remove what's bad (evidence is kept) | `[3]` → `[R]` | `schtasks /query /fo LIST /v`, `reg query ...\Run` |

@@ -284,8 +284,20 @@ function Test-ScoredTcpPort([int]$port, $rules, $profiles, $procNames) {
     } else {
         Set-Result $key 'UP' ("listening on {0} ({1})" -f ($addrs -join ','), $procName)
     }
-    foreach ($svc in (Get-OwningServices $procId)) {
-        if ($svc.StartMode -ne 'Auto') { Set-Result $key 'WARN' ("service '{0}' start mode is {1}: it will NOT come back after a reboot" -f $svc.Name, $svc.StartMode) "Fix: Set-Service '$($svc.Name)' -StartupType Automatic" }
+    # Start-mode check. Several services can share one process (lsass.exe hosts NTDS, Kdc AND
+    # KeyIso; svchost groups others), so only warn when NONE of the owners starts automatically.
+    # Some services are Manual by design and are started by Windows itself (TermService, trigger-
+    # start services): those are not a reboot risk.
+    $owners = @(Get-OwningServices $procId)
+    $onDemand = @('TermService', 'KeyIso', 'SessionEnv', 'UmRdpService', 'W32Time', 'Netlogon', 'Kdc', 'NTDS', 'DNS', 'LanmanServer')
+    $auto = @($owners | Where-Object { $_.StartMode -eq 'Auto' -or $onDemand -contains $_.Name })
+    if ($owners.Count -gt 0 -and $auto.Count -eq 0) {
+        $svc = $owners[0]
+        $trig = Test-Path ("HKLM:\SYSTEM\CurrentControlSet\Services\{0}\TriggerInfo" -f $svc.Name)
+        if (-not $trig -and $svc.StartMode -ne 'Auto') { Set-Result $key 'WARN' ("service '{0}' start mode is {1}: it will NOT come back after a reboot" -f $svc.Name, $svc.StartMode) "Fix: Set-Service '$($svc.Name)' -StartupType Automatic" }
+    }
+    foreach ($svc in $owners) {
+        if ($svc.StartMode -eq 'Disabled') { Set-Result $key 'WARN' ("service '{0}' is DISABLED but owns this port: it will not start again" -f $svc.Name) "Fix: Set-Service '$($svc.Name)' -StartupType Automatic" }
     }
     if ($reachable.Count -gt 0 -and -not (Test-TcpConnect $myIp $port)) {
         Set-Result $key 'DOWN' "TCP connect to ${myIp}:$port failed although something is listening" 'Usually the host firewall, an IPsec rule, or the process is hung. Restart the service if the firewall is clean.'
