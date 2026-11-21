@@ -66,36 +66,24 @@ Initialize-Ccdc -ScriptName 'Audit-Persistence' -OutFile $OutFile -ReadOnly
 $null   = Get-CcdcConfig -Path $ConfigPath
 $cutoff = (Get-Date).AddDays(-$RecentDays)
 
-# Paths a normal program should not run from. Attackers love these because
-# any user can write there.
-$badPathRegex  = '(?i)\\(Users\\[^\\]+\\(AppData|Downloads|Desktop|Documents)|Users\\Public|ProgramData\\(?!Microsoft)|Windows\\Temp|\\Temp\\|PerfLogs|\$Recycle)'
-# Command lines that are almost always malicious in a scheduled task / Run key.
-$badCmdRegex   = '(?i)(-enc(odedcommand)?\s|frombase64string|iex\s*\(|invoke-expression|downloadstring|bitsadmin|certutil.+-urlcache|mshta|regsvr32.+/i:http|rundll32.+javascript|\bnc(\.exe)?\s|ncat|socat|powercat)'
-
-function Get-Severity([string]$text) {
-    if ($text -match $badCmdRegex) { return 'RED' }
-    if ($text -match $badPathRegex) { return 'RED' }
-    return 'YELLOW'
-}
+# Shared rules (lib\CCDC-Common.ps1), the same ones panel R uses to remove things.
+$badPathRegex = $script:CcdcBadPathRegex
+$badCmdRegex  = $script:CcdcBadCmdRegex
+function Get-Severity([string]$text) { return (Get-CcdcPersistSeverity $text) }
 
 # ---------------------------------------------------------------------------
-Write-Section '1. Scheduled tasks (non-Microsoft)'
+Write-Section '1. Scheduled tasks (Windows'' own and Microsoft-signed hidden)'
 # ---------------------------------------------------------------------------
 if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
     $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue
     $n = 0
     foreach ($t in $tasks) {
         $actions = ($t.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)".Trim() }) -join ' | '
-        $isMsPath = $t.TaskPath -like '\Microsoft\*'
-        $isMsAuthor = $t.Author -match 'Microsoft|^\$\(@%SystemRoot%'
-        # Microsoft-path tasks are only interesting if their action looks bad (attackers hide there too).
-        if ($isMsPath -and $isMsAuthor -and $actions -notmatch $badCmdRegex -and $actions -notmatch $badPathRegex) { continue }
+        if (Test-CcdcTaskIsNoise $t $actions) { continue }   # Windows' own, Microsoft-signed, or the toolkit's
         $n++
-        $lvl = Get-Severity $actions
-        if ($isMsPath -and -not $isMsAuthor) { $lvl = 'RED' }   # non-MS task hiding under \Microsoft\
-        Write-Finding -Level $lvl -Category 'SchedTask' -Message ("{0}{1}  [{2}] author={3}" -f $t.TaskPath, $t.TaskName, $t.State, $t.Author) -Detail $actions
+        Write-Finding -Level (Get-Severity $actions) -Category 'SchedTask' -Message ("{0}{1}  [{2}]" -f $t.TaskPath, $t.TaskName, $t.State) -Detail $actions
     }
-    if ($n -eq 0) { Write-Finding -Level GREEN -Category 'SchedTask' -Message 'No non-Microsoft scheduled tasks found.' }
+    if ($n -eq 0) { Write-Finding -Level GREEN -Category 'SchedTask' -Message 'No suspicious scheduled tasks.' }
 } else {
     Write-Finding -Level INFO -Category 'SchedTask' -Message 'Get-ScheduledTask unavailable; run: schtasks /query /fo LIST /v'
 }
@@ -141,8 +129,11 @@ foreach ($k in $runKeys) {
     if (-not $props) { continue }
     foreach ($p in $props.PSObject.Properties) {
         if ($p.Name -like 'PS*') { continue }   # PSPath, PSParentPath... are PowerShell metadata
+        $rv = [string]$p.Value; $rl = Get-Severity $rv
+        $exe = if ($rv -match '^\s*"([^"]+)"') { $Matches[1] } else { ($rv -split '\s+')[0] }
+        if ($rl -ne 'RED' -and (Test-CcdcMsSigned $exe)) { continue }   # Microsoft-signed autostart (e.g. SecurityHealthSystray)
         $n++
-        Write-Finding -Level (Get-Severity ([string]$p.Value)) -Category 'RunKey' -Message ("{0} -> {1}" -f ($k -replace '^(HKLM:|Registry::HKEY_USERS)\\', ''), $p.Name) -Detail ([string]$p.Value)
+        Write-Finding -Level $rl -Category 'RunKey' -Message ("{0} -> {1}" -f ($k -replace '^(HKLM:|Registry::HKEY_USERS)\\', ''), $p.Name) -Detail ([string]$p.Value)
     }
 }
 if ($n -eq 0) { Write-Finding -Level GREEN -Category 'RunKey' -Message 'Run/RunOnce keys are empty.' }

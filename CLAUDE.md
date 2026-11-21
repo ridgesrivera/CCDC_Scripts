@@ -42,6 +42,7 @@ windows/harden/Harden-Walkthrough.ps1  THE hardening tool: data-driven $steps (r
 windows/harden/Set-Firewall.ps1  BASIC firewall: allow all listening ports, block other inbound, safety timer, -Revert.
 windows/hunt/Find-Attacks.ps1  Red Team response: logon attempts on every service + attack checks, each with steps.
 windows/hunt/Find-Beacons.ps1  C2 beacon scan (sampled connections, pipes, DNS cache).
+windows/hunt/Repair-DNS.ps1  DNS outage: diagnose (stopped/disabled/crashed/zone/firewall), standard fixes, verify.
 windows/hunt/Kick-Block.ps1  kick user (log off + disable) / block IP (in+out), journal C:\ccdc\kick-block.csv, undo.
 windows/audit/Audit-Vulns.ps1  each check = Applies + Eval(param $S) run against live state AND a snapshot. Only read
                              registry keys that are inside Get-CcdcRegCatalog, or the BEFORE column shows '?'
@@ -70,7 +71,7 @@ docs/events/                 per-event notes from team packets (box roles, scori
   low-overhead (no sound, no tray icons, no background loops besides `-Watch`).
 
 ## Panel keys (v3.2)
-MONITOR D N · RED TEAM RESPONSE E X R I · SNAPSHOT S W U · AUDIT 1-8 A · HARDEN 10-15 · BACKUP B P L · 0 first-15 · ?<key> · H help.
+MONITOR D N · RED TEAM RESPONSE E X R F I · SNAPSHOT S W U · AUDIT 1-8 A · HARDEN 10-15 · BACKUP B P L · 0 first-15 · ?<key> · H help.
 Ridge's direction: keep it small (replace, don't add), no scoring guesswork / points language in output, everything that
 can break a service must be reversible, first-15 does start-of-competition steps ONLY.
 Docs reference these keys; update README, docs/first-15-minutes-windows.md and docs/events/* when they change.
@@ -89,6 +90,10 @@ Docs reference these keys; update README, docs/first-15-minutes-windows.md and d
 - `$h1.Keys + $h2.Keys` throws (KeyCollection has no op_Addition). Use `@($h1.Keys) + @($h2.Keys)`.
 - A native argument like `/file:(Join-Path ...)` is passed as TWO arguments. Build the string first: `"/file:$path"`.
 - Aliases beat functions: never name a helper `r`, `h`, `gc`, `gi`, `gp`, `sc`, `ls`.... Check: compare `function` names against `Get-Alias` output.
+- Persistence noise rules live in lib (Get-CcdcPersistSeverity, Test-CcdcMsSigned, Test-CcdcTaskIsNoise): shared by
+  Audit-Persistence and Remove-Persistence. Hide Microsoft-signed / Windows-internal / toolkit items; never hide content
+  that matches the bad-command or script-outside-Windows rules.
+- Output rule (Ridge): condensed, grouped, few false flags. One line per problem; long lists go to the report file.
 - Throttle keys in `alert-state.json` must be cleared by the self-test (regex near the top of bt-selftest.ps1)
   when you add a new throttle prefix.
 

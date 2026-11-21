@@ -108,16 +108,14 @@ $hostCfg = Get-CcdcHostConfig -Config $config
 $scoredPorts = @(); if ($hostCfg) { $scoredPorts = @($hostCfg.scoredPorts.tcp) }
 $cutoff = (Get-Date).AddDays(-$RecentDays)
 
-# Same heuristics as audit\Audit-Persistence.ps1 (keep the two in step).
-$badPathRegex = '(?i)\\(Users\\[^\\]+\\(AppData|Downloads|Desktop|Documents)|Users\\Public|ProgramData\\(?!Microsoft)|Windows\\Temp|\\Temp\\|PerfLogs|\$Recycle)'
-$badCmdRegex  = '(?i)(-enc(odedcommand)?\s|frombase64string|iex\s*\(|invoke-expression|downloadstring|bitsadmin|certutil.+-urlcache|mshta|regsvr32.+/i:http|rundll32.+javascript|\bnc(\.exe)?\s|ncat|socat|powercat)'
+# Shared rules (lib\CCDC-Common.ps1) so the audit and the remover agree.
+$badPathRegex = $script:CcdcBadPathRegex
+$badCmdRegex  = $script:CcdcBadCmdRegex
 $launcherRegex = '(?i)(cmd(\.exe)?"?\s+/c|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32)'
 $protectedPathRegex = '(?i)^[A-Z]:\\(Windows|Program Files( \(x86\))?)\\'
 
-function Get-Severity([string]$text) {
-    if ($text -match $badCmdRegex -or $text -match $badPathRegex) { return 'RED' }
-    return 'YELLOW'
-}
+function Get-Severity([string]$text) { return (Get-CcdcPersistSeverity $text) }
+function Test-MsSignedFile([string]$path) { return (Test-CcdcMsSigned $path) }
 
 function Get-PayloadPath([string]$commandLine) {
     <#
@@ -150,13 +148,9 @@ function Find-Tasks {
     foreach ($t in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) {
         $full = "$($t.TaskPath)$($t.TaskName)"
         $visible[$full.ToLower()] = $true
-        if ($t.TaskName -like 'CCDC-*') { continue }   # our own (firewall rollback, watch loop)
         $actions = ($t.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)".Trim() }) -join ' | '
-        $isMsPath = $t.TaskPath -like '\Microsoft\*'
-        $isMsAuthor = $t.Author -match 'Microsoft|^\$\(@%SystemRoot%'
-        if ($isMsPath -and $isMsAuthor -and $actions -notmatch $badCmdRegex -and $actions -notmatch $badPathRegex) { continue }
+        if (Test-CcdcTaskIsNoise $t $actions) { continue }
         $lvl = Get-Severity $actions
-        if ($isMsPath -and -not $isMsAuthor) { $lvl = 'RED' }
         Add-Candidate -Type 'Task' -Level $lvl -Name $full -Detail ("[{0}] author={1} runs: {2}" -f $t.State, $t.Author, $actions) -Payload (Get-PayloadPath $actions) -Data $t
     }
     # Hidden tasks: registered in the registry but invisible to Task Scheduler (SD value deleted).
@@ -201,7 +195,9 @@ function Find-RunKeys {
         foreach ($p in $props.PSObject.Properties) {
             if ($p.Name -like 'PS*') { continue }
             $val = [string]$p.Value
-            Add-Candidate -Type 'RunKey' -Level (Get-Severity $val) -Name ("{0} -> {1}" -f ($k -replace '^(HKLM:|Registry::HKEY_USERS)\\', ''), $p.Name) -Detail $val -Payload (Get-PayloadPath $val) -Data @{ Key = $k; Value = $p.Name }
+            $lvlRun = Get-Severity $val
+            if ($lvlRun -ne 'RED' -and (Test-MsSignedFile (Get-PayloadPath $val))) { continue }   # e.g. SecurityHealthSystray
+            Add-Candidate -Type 'RunKey' -Level $lvlRun -Name ("{0} -> {1}" -f ($k -replace '^(HKLM:|Registry::HKEY_USERS)\\', ''), $p.Name) -Detail $val -Payload (Get-PayloadPath $val) -Data @{ Key = $k; Value = $p.Name }
         }
     }
 }
@@ -237,7 +233,7 @@ function Find-Registry {
             $dbg = (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).Debugger
             if ($dbg) {
                 $lvl = if ($accessibility -contains $_.PSChildName.ToLower()) { 'RED' } else { 'YELLOW' }
-                Add-Candidate -Type 'Ifeo' -Level $lvl -Name ("IFEO {0}" -f $_.PSChildName) -Detail "Debugger = $dbg" -Data @{ Key = $_.PSPath; RegKey = $_.Name }
+                Add-Candidate -Type 'Ifeo' -Level $lvl -Name ("IFEO {0}{1}" -f $_.PSChildName, $(if ($base -like '*WOW6432Node*') { ' (32-bit view)' } else { ' (64-bit view)' })) -Detail "Debugger = $dbg" -Data @{ Key = $_.PSPath; RegKey = $_.Name }
             }
         }
     }

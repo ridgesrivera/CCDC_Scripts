@@ -213,7 +213,8 @@ if ($pth) {
 } else { Show-Clear 'pass-the-hash (logon type 9)' }
 
 # Someone added to an admin group.
-$adds = @(Get-Ev 'Security' @(4728, 4732, 4756) $t2 | Where-Object { $admSids -contains $_.TargetSid -or $_.TargetSid -match '-(512|518|519|520)$' -or $_.TargetUserName -eq 'DnsAdmins' })
+# Windows itself (domain creation, machine setup) shows up as ANONYMOUS LOGON or a machine account: not an attack.
+$adds = @(Get-Ev 'Security' @(4728, 4732, 4756) $t2 | Where-Object { ($admSids -contains $_.TargetSid -or $_.TargetSid -match '-(512|518|519|520)$' -or $_.TargetUserName -eq 'DnsAdmins') -and $_.SubjectUserName -notmatch '\$$|^ANONYMOUS LOGON$|^-$' })
 if ($adds) {
     Show-Attack 'New admin' 'An account was added to an admin-level group. Unless your team did it, this is Red Team giving themselves a way back in.' `
         @($adds | ForEach-Object { "{0}  {1} -> {2}  by {3} (from {4})" -f $_._Time.ToString('MM-dd HH:mm'), ($_.MemberName -replace '^CN=([^,]+),.*$', '$1'), $_.TargetUserName, $_.SubjectUserName, $(if (($s = Get-CcdcLogonSource $_.SubjectLogonId)) { $s } else { '?' }) }) `
@@ -223,7 +224,23 @@ if ($adds) {
 } else { Show-Clear 'accounts added to admin groups' }
 
 # New services (PsExec and friends install a service to run their command).
-$svc = @(Get-Ev 'System' @(7045) $t2)
+# Hide Microsoft's own installs (drivers, Edge, printer services) but never hide a service that
+# runs a shell / script host, lives in a user-writable folder, or is not Microsoft-signed.
+$sigCache = @{}
+function Test-MsSigned([string]$imagePath) {
+    $exe = if ($imagePath -match '^\s*"([^"]+)"') { $Matches[1] } else { ($imagePath -split '\s+')[0] }
+    $exe = [Environment]::ExpandEnvironmentVariables(($exe -replace '^\\SystemRoot', '%SystemRoot%' -replace '^\\\?\?\\', ''))
+    if ($exe -match '^(?i)system32\\') { $exe = Join-Path $env:SystemRoot $exe }   # driver paths are often relative
+    if (-not $sigCache.ContainsKey($exe)) {
+        $sig = Get-AuthenticodeSignature -FilePath $exe -ErrorAction SilentlyContinue
+        $sigCache[$exe] = ($sig -and $sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -match 'O=Microsoft Corporation')
+    }
+    return $sigCache[$exe]
+}
+$svc = @(Get-Ev 'System' @(7045) $t2 | Where-Object {
+    $ip = [string]$_.ImagePath
+    ($ip -match '(?i)cmd(\.exe)?\s|/c\s|powershell|pwsh|rundll32|mshta|regsvr32|wscript|cscript|%comspec%|\\(temp|appdata|programdata|users\\public|perflogs)\\') -or -not (Test-MsSigned $ip)
+})
 if ($svc) {
     Show-Attack 'New service' 'A service was installed. Remote-command tools (PsExec, Impacket, Cobalt Strike) do this to run as SYSTEM; malware does it to survive reboots.' `
         @($svc | ForEach-Object { "{0}  {1} -> {2}" -f $_._Time.ToString('MM-dd HH:mm'), $_.ServiceName, $_.ImagePath }) `
@@ -231,7 +248,8 @@ if ($svc) {
 } else { Show-Clear 'new services' }
 
 # New scheduled tasks.
-$tasks = @(Get-Ev 'Security' @(4698) $t2)
+# The toolkit's own tasks (LIVE ALERTS, firewall timer) and tasks Windows creates itself are not attacks. One line per task.
+$tasks = @(Get-Ev 'Security' @(4698) $t2 | Where-Object { $_.TaskName -notmatch '^\\(BT-Alert-|CCDC-)' -and $_.SubjectUserName -notmatch '\$$' } | Sort-Object _Time -Descending | Group-Object TaskName | ForEach-Object { $_.Group[0] })
 if ($tasks) {
     Show-Attack 'New scheduled task' 'A scheduled task was created: the most common way to get back in after being kicked.' `
         @($tasks | ForEach-Object { "{0}  {1}  by {2}" -f $_._Time.ToString('MM-dd HH:mm'), $_.TaskName, $_.SubjectUserName }) `

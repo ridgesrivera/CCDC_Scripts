@@ -34,7 +34,8 @@ what it changes, how to undo it, and the manual commands it automates, so newer 
 
   RED TEAM RESPONSE   something is happening
    [E]  Find attacks (what to do)     [X]  Kick user / block IP
-   [R]  Remove persistence            [I]  Incident worksheet
+   [R]  Remove persistence            [F]  Fix DNS outage
+   [I]  Incident worksheet
 
   SNAPSHOT  what changed, and put it back
    [S]  Take snapshot                 [W]  What changed?
@@ -53,7 +54,7 @@ what it changes, how to undo it, and the manual commands it automates, so newer 
    [14] SQL Server hardening          [15] Reset krbtgt (DC)
 
   BACKUP & LOGGING
-   [B]  Backup this box               [P]  Per-service backup
+   [B]  Backup AD / IIS               [P]  Per-service backup
    [L]  Setup logging
 ```
 
@@ -65,11 +66,12 @@ The header above the menu shows the box's role and IPs, whether you're elevated,
 **`[0]` First 15 minutes** does only what belongs at the very start, asking before each step:
 
 1. **Snapshot:** records how the box looks before anyone changes it (the ORIGINAL).
-2. **Backup:** registry, tasks and firewall. On a DC it also backs up GPOs, DNS zones and AD objects. With IIS it also backs up the IIS config and web roots.
+2. **Backup:** Active Directory on a DC (GPOs, DNS zones, AD objects), IIS on a web server (config + web roots). Nothing else.
 3. **LIVE ALERTS on:** keep the watch window open all day.
-4. **Who is on this box:** every way in, and who is connected right now.
-5. **Users & admins:** who has admin, and which accounts are risky.
-6. **Vulnerability check:** what Red Team can walk straight into.
+4. **Ways in + ports + SSH keys:** every open port with its program (odd or risky ones flagged), every SSH key, who is connected now.
+5. **Admin users** and risky accounts.
+6. **PII:** card numbers, SSNs, passwords in files and SQL Server.
+7. **Vulnerability check:** what Red Team can walk straight into.
 
 Then, by hand, in this order: `10` rotate admin passwords (scored accounts go through a Password Change Request
 first), `X` kick unknown admins, `12` apply the SAFE hardening steps, `11` basic firewall.
@@ -96,6 +98,7 @@ Every Windows attack, how to spot it, how to stop it without breaking things: [`
 | E | `hunt\Find-Attacks.ps1` | **You don't need to know the attack.** Part 1: logon attempts on every service (Windows, Kerberos, NTLM, SSH, SQL Server, IIS, FTP) with a verdict per IP: brute force, spray, or logged in after failing. Part 2: Kerberoasting, AS-REP roasting, DCSync, pass-the-hash, new admin, new service / PsExec, new task, web shell / xp_cmdshell, credential dumping, log cleared, Defender tampering, Zerologon. Each finding: what it is, evidence, numbered steps |
 | X | `hunt\Kick-Block.ps1` | Log a user off everywhere (RDP, SMB, WinRM, SSH) + disable the account, and/or block an IP in + out (closes its SMB sessions, shows who logged on from it). Refuses to block this box, warns before blocking a trusted IP or a live RDP session. Undo: unblock / re-enable |
 | R | `hunt\Remove-Persistence.ps1` | Numbered list of removable persistence; each pick is exported + hashed (creator, source IP), then disabled / quarantined, with an undo command |
+| F | `hunt\Repair-DNS.ps1` | DNS down: was it just turned off, or crashed / zone missing / blocked? Tries the standard fixes (enable + start, restart, firewall rules, resume zones, re-register DC records), each confirmed, then verifies real lookups and says what is left |
 | I | `hunt\New-IncidentReport.ps1` | Candidate attacker IPs, timeline, what was removed: the facts for an incident report |
 
 ### Snapshot
@@ -130,7 +133,7 @@ Every Windows attack, how to spot it, how to stop it without breaking things: [`
 ### Backup & logging
 | Key | Script | What it does |
 |---|---|---|
-| B | `backup\Backup-Box.ps1` | Registry, tasks, firewall, users; DC: GPOs, DNS, AD objects (LDIF); IIS: appcmd backup + applicationHost.config + web roots |
+| B | `backup\Backup-Box.ps1` | DC: GPOs, DNS zones, AD objects (LDIF). IIS: appcmd backup + applicationHost.config + web roots. `-Full` adds registry, tasks, firewall |
 | P | `services\*.ps1` | Per service (AD, DNS, DHCP, IIS, SQL, MySQL, SMB, FTP, RDP, WinRM, SSH, VNC, SNMP, OpenVPN, NFS, mail...): detect, back up, verify, restore one |
 | L | `logging\Setup-Logging.ps1` | Audit policy, log sizes, PowerShell logging, Sysmon (if staged), forward to Graylog / syslog |
 

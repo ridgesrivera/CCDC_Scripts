@@ -689,8 +689,6 @@ if (-not $rdpOff) {
   if ($nla -ne 1) { Write-Host '        NLA is OFF: the login screen is offered to anyone before they prove who they are' -ForegroundColor Yellow }
 }
 Show-Way 'SSH'      'OpenSSH server: command line as a user'                 @(22) @('sshd')
-$ak = "$env:ProgramData\ssh\administrators_authorized_keys"
-if (Test-Path $ak) { $n = @(Get-Content $ak -EA 0 | Where-Object { $_ -match '^\s*(ssh|ecdsa)-' }).Count; if ($n) { Write-Host "        $n admin SSH key(s) in $ak (a key = login with no password)" -ForegroundColor Yellow } }
 Show-Way 'SMB'      'file shares; admin shares C$/ADMIN$ also let an admin run commands remotely (PsExec)' @(445, 139) @('LanmanServer')
 Show-Way 'WinRM'    'PowerShell remoting: remote command line'               @(5985, 5986) @('WinRM')
 Show-Way 'WMI/DCOM' 'remote management over RPC (wmic, Invoke-WmiMethod)'     @(135) @('RpcSs')
@@ -749,11 +747,61 @@ if ($other) {
   Note 'Outbound from an unexpected process (powershell, rundll32, something in Temp) can be a C2 beacon: panel 8.'
 } else { Note 'none' }
 
-Section "Listening ports not covered above (under 49152; yellow = check this)"
-$std = 53,88,389,464,593,636,3268,3269,9389,47001 + $known
-$listen | Where-Object { $_.LocalPort -lt 49152 } | Sort-Object LocalPort -Unique | ForEach-Object {
-  if ($std -notcontains [int]$_.LocalPort) { Write-Host ('  {0,-6} {1}   <-- what is this?' -f $_.LocalPort, $procName[[int]$_.OwningProcess]) -ForegroundColor Yellow }
+Section "SSH keys (a key = log in with NO password; checked even if SSH is off)"
+$keyFiles = @("$env:ProgramData\ssh\administrators_authorized_keys") + @(Get-ChildItem 'C:\Users' -Directory -EA 0 | ForEach-Object { Join-Path $_.FullName '.ssh\authorized_keys' })
+$anyKey = $false
+foreach ($kf in $keyFiles) {
+  if (-not (Test-Path $kf)) { continue }
+  foreach ($line in (Get-Content $kf -EA 0 | Where-Object { $_ -match '^\s*[^#\s]' })) {
+    $parts = $line.Trim() -split '\s+'
+    $type = ($parts | Where-Object { $_ -match '^(ssh-|ecdsa-|sk-)' } | Select-Object -First 1)
+    $comment = if ($parts.Count -ge 3) { $parts[-1] } else { '(no comment)' }
+    Write-Host ("  [??] {0,-12} {1,-28} in {2}" -f $type, $comment, $kf) -ForegroundColor Yellow
+    $anyKey = $true
+  }
 }
+if ($anyKey) { Note 'Not your team''s key? Delete that line from the file (copy the file somewhere safe first). administrators_authorized_keys = admin login.' }
+else { Note 'No SSH keys on this box.' }
+
+Section "Every listening port (OK = expected, CHECK = out of place, RISKY = likely malicious)"
+# What each well-known port is, so you can tell at a glance whether it belongs.
+$portInfo = @{
+  21 = 'FTP file transfer'; 22 = 'SSH'; 23 = 'Telnet (clear-text shell)'; 25 = 'SMTP mail'; 53 = 'DNS'; 80 = 'web (HTTP)'; 88 = 'Kerberos (AD logins)'
+  110 = 'POP3 mail'; 135 = 'RPC / WMI'; 139 = 'NetBIOS file sharing'; 143 = 'IMAP mail'; 389 = 'LDAP (Active Directory)'; 443 = 'web (HTTPS)'
+  445 = 'SMB file sharing'; 464 = 'Kerberos password change'; 587 = 'mail submission'; 593 = 'RPC over HTTP'; 636 = 'LDAPS (AD)'; 993 = 'IMAPS'; 995 = 'POP3S'
+  1433 = 'SQL Server'; 3268 = 'AD Global Catalog'; 3269 = 'AD Global Catalog (SSL)'; 3306 = 'MySQL'; 3389 = 'RDP'; 5432 = 'PostgreSQL'
+  5800 = 'VNC (web)'; 5900 = 'VNC'; 5901 = 'VNC'; 5985 = 'WinRM (PowerShell remoting)'; 5986 = 'WinRM (HTTPS)'; 8080 = 'web (alt)'; 8443 = 'web (alt HTTPS)'
+  9389 = 'AD Web Services'; 47001 = 'WinRM listener (local)'; 1194 = 'OpenVPN'; 2049 = 'NFS'; 161 = 'SNMP'
+}
+$riskyPorts = 23, 1337, 31337, 4444, 4445, 5555, 6666, 6667, 7777, 9001, 9999, 12345, 50050, 8888
+$shellProcs = 'powershell', 'pwsh', 'cmd', 'nc', 'ncat', 'socat', 'python', 'python3', 'perl', 'ruby', 'rundll32', 'mshta', 'plink'
+$winProcs = 'System', 'lsass', 'svchost', 'services', 'wininit', 'spoolsv', 'dns', 'dfsrs', 'Microsoft.ActiveDirectory.WebServices', 'ismserv', 'inetinfo', 'w3wp', 'sqlservr', 'sqlbrowser', 'sshd', 'mysqld', 'httpd', 'nginx', 'certsrv', 'wsmprovhost', 'ntfrs', 'dhcpserver', 'tvnserver', 'winvnc'
+$isDCbox = (Get-CimInstance Win32_ComputerSystem -EA 0).DomainRole -ge 4
+$procPath = @{}; foreach ($p in $procs) { $procPath[[int]$p.ProcessId] = [string]$p.ExecutablePath }
+$svcByPid = @{}; foreach ($v in $svcs.Values) { if ($v.ProcessId) { $svcByPid[[int]$v.ProcessId] += @($v.Name) } }
+$rows = @()
+foreach ($l in ($listen | Where-Object { $_.LocalAddress -notmatch '^(127\.|::1$)' } | Sort-Object LocalPort -Unique)) {
+  $port = [int]$l.LocalPort; $owner = [int]$l.OwningProcess
+  $name = $procName[$owner]; $path = $procPath[$owner]; $svcNames = (@($svcByPid[$owner]) | Select-Object -First 3) -join ','
+  if ($port -ge 49152 -and $winProcs -contains $name) { continue }   # Windows dynamic RPC ports: normal
+  $what = if ($portInfo.ContainsKey($port)) { $portInfo[$port] } else { 'unknown port' }
+  $verdict = 'OK'; $why = ''
+  if ($riskyPorts -contains $port) { $verdict = 'RISKY'; $why = 'common backdoor / reverse-shell port' }
+  elseif ($shellProcs -contains $name) { $verdict = 'RISKY'; $why = "$name should never listen on a port (bind shell)" }
+  elseif ($path -match '(?i)\\(temp|appdata|users\\public|programdata|windows\\tasks|perflogs)\\') { $verdict = 'RISKY'; $why = 'program runs from a user-writable folder' }
+  elseif ($port -in 5800, 5900, 5901) { $verdict = 'CHECK'; $why = 'VNC: remote desktop, often no password or a weak one' }
+  elseif ($port -eq 21) { $verdict = 'CHECK'; $why = 'FTP sends passwords in clear text' }
+  elseif ($isDCbox -and $name -eq 'spoolsv') { $verdict = 'CHECK'; $why = 'Print Spooler on a DC: not needed, and a known attack path (panel 12)' }
+  elseif (-not $portInfo.ContainsKey($port) -and $winProcs -notcontains $name) { $verdict = 'CHECK'; $why = 'not a usual Windows / AD / web port: what is this program?' }
+  $rows += [pscustomobject]@{ Port = $port; What = $what; Program = $name; Service = $svcNames; Verdict = $verdict; Why = $why; Path = $path }
+}
+foreach ($r in $rows) {
+  $col = @{ OK = 'Gray'; CHECK = 'Yellow'; RISKY = 'Red' }[$r.Verdict]
+  Write-Host ("  [{0,-5}] TCP {1,-6} {2,-28} {3,-18} {4}" -f $r.Verdict, $r.Port, $r.What, $r.Program, $(if ($r.Service) { "svc: $($r.Service)" } else { '' })) -ForegroundColor $col
+  if ($r.Verdict -ne 'OK') { Write-Host ("          {0}  ({1})" -f $r.Why, $(if ($r.Path) { $r.Path } else { 'path unknown' })) -ForegroundColor $col }
+}
+Note 'Ports above 49152 owned by Windows itself (lsass, svchost, dns...) are normal RPC ports and are hidden.'
+Note 'Not needed on this box? Stop the service (Set-Service <svc> -StartupType Disabled) after checking nothing uses it. RISKY: panel 8 and R.'
 
 # ---------- baseline / what's new ----------
 # admins by well-known SID so it works on any language: Domain Admins = <domain SID>-512, local Administrators = S-1-5-32-544
@@ -839,11 +887,12 @@ $rxMail = '\b[\w.+-]+@[\w-]+\.[\w.]+\b'
 $rxPw   = '(?i)(password|passwd|pwd|cpassword|connectionstring)\s*[=:"]'
 
 Say "`n=== 1. FILES ===" Cyan
+$office = @(); $hits = 0
 foreach ($p in $Paths) {
   if (-not (Test-Path $p)) { continue }
   Get-ChildItem $p -Recurse -File -Include $exts -Force | Where-Object { $_.Length -lt ($MaxMB * 1MB) } | ForEach-Object {
     $f = $_.FullName
-    if ($_.Extension -in ".xlsx",".docx") { Say ("[OFFICE] {0}  (open it: Office files are zipped, regex can't see inside)" -f $f) Yellow; return }
+    if ($_.Extension -in ".xlsx",".docx") { $office += $f; return }   # zipped: listed once at the end
     $text = [IO.File]::ReadAllText($f)
     $cards = @([regex]::Matches($text, $rxCard) | Where-Object { Test-Luhn $_.Value }).Count
     $ssn   = ([regex]::Matches($text, $rxSSN)).Count
@@ -851,12 +900,17 @@ foreach ($p in $Paths) {
     $mail  = ([regex]::Matches($text, $rxMail)).Count
     $pw    = ([regex]::Matches($text, $rxPw)).Count
     if ($cards -or $ssn -or $nid -gt 2 -or $mail -gt 5 -or $pw) {
-      $c = if ($cards -or $ssn) { "Red" } else { "Yellow" }
+      $c = if ($cards -or $ssn) { "Red" } else { "Yellow" }; $hits++
       Say ("{0}`n    cards={1} ssn={2} national-id={3} emails={4} pw-strings={5}  modified={6}" -f $f, $cards, $ssn, $nid, $mail, $pw, $_.LastWriteTime) $c
     }
   }
 }
-Say "`nWeb-reachable? Anything above under C:\inetpub\wwwroot (or htdocs) can be downloaded by anyone." Yellow
+if ($hits -eq 0) { Say "No PII found in files." Green }
+if ($office) {
+  Say ("{0} Office file(s) could not be read automatically (zipped): open the ones that look like customer or HR data. List in {1}" -f $office.Count, $report) Yellow
+  $office | ForEach-Object { "   OFFICE $_" | Out-File $report -Append }
+}
+if ($hits) { Say "Anything above under C:\inetpub\wwwroot (or htdocs) can be downloaded by anyone: move or restrict it." Yellow }
 
 Say "`n=== 2. SMB SHARES ===" Cyan
 Get-SmbShare | Where-Object { $_.Name -notin "IPC$" } | ForEach-Object {
