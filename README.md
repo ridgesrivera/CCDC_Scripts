@@ -78,6 +78,7 @@ first), `X` kick unknown admins, `12` apply the SAFE hardening steps, `11` basic
 **Something broke?** `W` → `1` shows what changed (and whether the toolkit did it), `U` puts it back.
 
 Full checklist: [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windows.md). Event notes: [`docs/events/`](docs/events/).
+Every Windows attack, how to spot it, how to stop it without breaking things: [`docs/Windows-Attacks-CCDC.pdf`](docs/Windows-Attacks-CCDC.pdf).
 
 ---
 
