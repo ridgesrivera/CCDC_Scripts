@@ -190,8 +190,11 @@ function Invoke-CcdcChange {
     }
     try {
         # 'Stop' turns non-terminating cmdlet errors into exceptions so the
-        # catch below sees them. (Native .exe tools never throw - scriptblocks
-        # that call reg.exe / auditpol.exe must check $LASTEXITCODE and throw.)
+        # catch below sees them. Native .exe tools do not throw on a bad exit code:
+        # scriptblocks that call reg.exe / auditpol.exe must check $LASTEXITCODE and throw.
+        # BUT on PS 5.1 "& tool.exe 2>&1" here DOES throw on any stderr text, even when
+        # the failure is harmless (e.g. schtasks /Delete of a task already gone). Run such
+        # calls with a local $ErrorActionPreference = 'Continue' (see Invoke-Exe in Set-Firewall).
         # GOTCHA for authors: the scriptblock runs inside this function, so
         # variables named $Target/$Action/$Force/$Undo/$Cmdlet/$ScriptBlock
         # refer to THIS function's parameters. Use other names in callers.

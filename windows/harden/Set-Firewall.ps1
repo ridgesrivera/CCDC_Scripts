@@ -84,6 +84,15 @@ $netshName = @{ Domain = 'domainprofile'; Private = 'privateprofile'; Public = '
 # ---------------------------------------------------------------------------
 # Record / restore profile settings
 # ---------------------------------------------------------------------------
+function Invoke-Exe {
+    # Runs a native tool and returns its output as text; check $LASTEXITCODE after.
+    # WHY: inside Invoke-CcdcChange ErrorActionPreference is 'Stop', and on PowerShell 5.1
+    # "& tool.exe 2>&1" then turns ANY stderr text into a thrown error. That aborted -Revert
+    # when schtasks said the timer task was already gone. Local 'Continue' avoids it.
+    param([string]$Exe, [string[]]$ArgList)
+    $ErrorActionPreference = 'Continue'
+    return @(& $Exe @ArgList 2>&1 | ForEach-Object { "$_" })
+}
 function Get-FwProfiles {
     # One object per profile: Name, Enabled (True/False), In (Block/Allow), Out (Block/Allow), LogBlocked (True/False)
     $out = @()
@@ -93,7 +102,7 @@ function Get-FwProfiles {
         }
     } else {
         foreach ($n in 'Domain', 'Private', 'Public') {
-            $txt = (& netsh.exe advfirewall show ($netshName[$n]) 2>$null) -join "`n"
+            $txt = (Invoke-Exe netsh.exe @('advfirewall', 'show', $netshName[$n])) -join "`n"
             $en = if ($txt -match '(?m)^State\s+ON') { 'True' } else { 'False' }
             $pol = if ($txt -match '(?m)^Firewall Policy\s+(\w+),(\w+)') { $Matches[1], $Matches[2] } else { 'BlockInbound', 'AllowOutbound' }
             $out += [pscustomobject]@{ Name = $n; Enabled = $en; In = ($pol[0] -replace 'Inbound(Always)?', ''); Out = ($pol[1] -replace 'Outbound', ''); LogBlocked = 'NotConfigured' }
@@ -135,7 +144,7 @@ function Restore-Fw {
     # 1. Remove only the toolkit's own rules.
     try {
         if ($hasNetSec) { Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction Stop }
-        else { foreach ($r in @($saved.Rules)) { $null = & netsh.exe advfirewall firewall delete rule name="$r" 2>&1 } }
+        else { foreach ($r in @($saved.Rules)) { $null = Invoke-Exe netsh.exe @('advfirewall', 'firewall', 'delete', 'rule', "name=$r") } }
         Write-Finding -Level GREEN -Category 'Revert' -Message 'Removed the CCDC Allow rules (no other rule touched).'
     } catch { $allOk = $false; Write-Finding -Level RED -Category 'Revert' -Message "Could not remove CCDC Allow rules: $($_.Exception.Message)" }
     # 2. Each profile back exactly as recorded.
@@ -147,13 +156,13 @@ function Restore-Fw {
                 Set-NetFirewallProfile @sp
             } else {
                 $np = $netshName[$p.Name]
-                $o1 = & netsh.exe advfirewall set $np firewallpolicy (ConvertTo-NetshPolicy $p) 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o1 -join ' ') }
-                $o2 = & netsh.exe advfirewall set $np state $(if ($p.Enabled -eq 'True') { 'on' } else { 'off' }) 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o2 -join ' ') }
+                $o1 = Invoke-Exe netsh.exe @('advfirewall', 'set', $np, 'firewallpolicy', (ConvertTo-NetshPolicy $p)); if ($LASTEXITCODE -ne 0) { throw ($o1 -join ' ') }
+                $o2 = Invoke-Exe netsh.exe @('advfirewall', 'set', $np, 'state', $(if ($p.Enabled -eq 'True') { 'on' } else { 'off' })); if ($LASTEXITCODE -ne 0) { throw ($o2 -join ' ') }
             }
         } catch { $allOk = $false; Write-Finding -Level RED -Category 'Revert' -Message "Profile $($p.Name): $($_.Exception.Message)" }
     }
-    # 3. Timer no longer needed.
-    $null = & schtasks.exe /Delete /TN $task /F 2>&1
+    # 3. Timer no longer needed. "Task not found" is normal (already cancelled or already fired).
+    try { $null = Invoke-Exe schtasks.exe @('/Delete', '/TN', $task, '/F') } catch { }
     # 4. Check it really matches.
     $now = Get-FwProfiles
     foreach ($p in @($saved.Profiles)) {
@@ -188,7 +197,7 @@ if ($RestoreFull) {
     $tmp = Join-Path "$env:windir\Temp" $f.Name
     $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'Windows Firewall' -Action "Import every rule and setting from $($f.Name)" -ScriptBlock {
         Copy-Item $f.FullName $tmp -Force
-        $o = & netsh.exe advfirewall import "$tmp" 2>&1
+        $o = Invoke-Exe netsh.exe @('advfirewall', 'import', $tmp)
         Remove-Item $tmp -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -ne 0) { throw ($o -join ' ') }
     }
@@ -206,7 +215,7 @@ $recordFile = Join-Path $saveDir "before_$stamp.json"
 if (-not $WhatIfPreference) {
     [pscustomobject]@{ Time = (Get-Date).ToString('s'); Profiles = $profilesBefore; Rules = @() } | ConvertTo-Json -Depth 4 | Set-Content -Path $recordFile -Encoding UTF8
     Write-RevertCmd $profilesBefore @()
-    $null = & netsh.exe advfirewall export (Join-Path $saveDir "before_$stamp.wfw") 2>&1   # extra full copy; not needed for revert
+    $null = Invoke-Exe netsh.exe @('advfirewall', 'export', (Join-Path $saveDir "before_$stamp.wfw"))   # extra full copy; not needed for revert
     Write-Finding -Level GREEN -Category 'Record' -Message "Recorded. Undo any time: panel 11 -> 2, or run $revertCmd as admin."
 }
 Write-Host '  Now:' -ForegroundColor White; Show-FwState
@@ -242,7 +251,7 @@ foreach ($spec in @($allowTcp | ForEach-Object { @{ P = 'TCP'; N = $_ } }) + @($
     if ($hasNetSec -and (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) { continue }
     $ok = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$true -Target "$proto $pt" -Action 'Allow inbound' -Undo "netsh advfirewall firewall delete rule name=""$ruleName""" -ScriptBlock {
         if ($hasNetSec) { $null = New-NetFirewallRule -DisplayName $ruleName -Group $group -Direction Inbound -Protocol $proto -LocalPort $pt -Action Allow -ErrorAction Stop }
-        else { $o = & netsh.exe advfirewall firewall add rule name="$ruleName" dir=in action=allow protocol=$proto localport=$pt 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o -join ' ') } }
+        else { $o = Invoke-Exe netsh.exe @('advfirewall', 'firewall', 'add', 'rule', "name=$ruleName", 'dir=in', 'action=allow', "protocol=$proto", "localport=$pt"); if ($LASTEXITCODE -ne 0) { throw ($o -join ' ') } }
     }
     if ($ok) { $added += $ruleName }
 }
@@ -270,7 +279,7 @@ if (-not $WhatIfPreference) {
     }
     if (-not $timerOk) {
         # Older Windows: schtasks (the path has no spaces, so no quotes are needed inside /TR).
-        $o = & schtasks.exe /Create /TN $task /TR $revertCmd /SC ONCE /ST $when.ToString('HH:mm') /SD $when.ToString('MM/dd/yyyy') /RU SYSTEM /RL HIGHEST /F 2>&1
+        $o = (Invoke-Exe schtasks.exe @('/Create', '/TN', $task, '/TR', $revertCmd, '/SC', 'ONCE', '/ST', $when.ToString('HH:mm'), '/SD', $when.ToString('MM/dd/yyyy'), '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F')) -join ' '
         $timerOk = ($LASTEXITCODE -eq 0)
     }
     if ($timerOk) { Write-Finding -Level GREEN -Category 'Timer' -Message "If you do not type YES, the firewall is put back at $($when.ToString('HH:mm')) automatically." }
@@ -280,9 +289,9 @@ if (-not $WhatIfPreference) {
 # ---------------------------------------------------------------------------
 Write-Section 'Step 5: turn the firewall on (inbound block, outbound allow, log drops)'
 $ok = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'all profiles' -Action 'Firewall ON, block inbound, allow outbound' -Undo '.\Set-Firewall.ps1 -Revert' -ScriptBlock {
-    $o1 = & netsh.exe advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o1 -join ' ') }
-    $null = & netsh.exe advfirewall set allprofiles logging droppedconnections enable 2>&1
-    $o2 = & netsh.exe advfirewall set allprofiles state on 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o2 -join ' ') }
+    $o1 = Invoke-Exe netsh.exe @('advfirewall', 'set', 'allprofiles', 'firewallpolicy', 'blockinbound,allowoutbound'); if ($LASTEXITCODE -ne 0) { throw ($o1 -join ' ') }
+    $null = Invoke-Exe netsh.exe @('advfirewall', 'set', 'allprofiles', 'logging', 'droppedconnections', 'enable')
+    $o2 = Invoke-Exe netsh.exe @('advfirewall', 'set', 'allprofiles', 'state', 'on'); if ($LASTEXITCODE -ne 0) { throw ($o2 -join ' ') }
 }
 Show-FwState
 
@@ -297,7 +306,7 @@ if (-not $ok) {
     Write-Host '  Check your services / the scoreboard too.' -ForegroundColor Yellow
     $a = Read-Host '  Did the new connection work and are services fine? Type YES to keep the firewall'
     if ($a -ceq 'YES') {
-        $null = & schtasks.exe /Delete /TN $task /F 2>&1
+        $null = Invoke-Exe schtasks.exe @('/Delete', '/TN', $task, '/F')
         Write-Finding -Level GREEN -Category 'Done' -Message 'Kept. Safety timer cancelled. Undo any time: panel 11 -> 2, or run C:\ccdc\firewall\revert.cmd as admin.'
         Write-Finding -Level INFO -Category 'Done' -Message 'Dropped connections are logged in %windir%\System32\LogFiles\Firewall\pfirewall.log'
     } else {
