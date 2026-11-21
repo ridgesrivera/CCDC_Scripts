@@ -66,7 +66,7 @@ GUI or Server Core, domain controller, member or standalone, any display languag
    [16] SQL Server hardening          [17] Reset krbtgt (DC)
 
   RESPOND   an alert fired, now what
-   [R]  Remove persistence            [O]  Log off sessions
+   [R]  Remove persistence            [X]  Log off sessions
    [I]  Incident worksheet
 
   BACKUP & LOGGING
@@ -103,7 +103,7 @@ touched it. Every changing option takes another snapshot first. A snapshot holds
 1. On each Windows box: open the panel (the ORIGINAL snapshot is saved) and press **`0`**. The guided run asks before each step: snapshot, overview, backup, **LIVE ALERTS on**, **vuln check**, users, persistence, baselines.
 2. Keep the **BT ALERTS** window open on every box. When the scoring engine's IP shows up in an alert, trust it: `D` → `3`.
 3. Close what `5` found, starting with what can't break scoring: `13` baseline hardening. Re-run `5` to see the CHANGE column.
-4. Passwords: `10` (scored accounts go through a **Password Change Request** in the scoring portal first), then `O` to kick old sessions. Then `12` firewall.
+4. Passwords: `10` (scored accounts go through a **Password Change Request** in the scoring portal first), then `X` to kick old sessions. Then `12` firewall.
 5. Something broke? `W` → `1` shows what changed, `U` puts it back. An alert fired? `D` → `5` (story of that IP), `R` remove persistence, `I` incident worksheet.
 
 Full checklist: [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windows.md). Event notes: [`docs/events/`](docs/events/).
@@ -156,7 +156,7 @@ Full checklist: [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windo
 | Key | Script | What it does |
 |---|---|---|
 | R | `hunt\Remove-Persistence.ps1` | Numbered list of removable persistence; each pick is exported + hashed with creator and source IP, then disabled / quarantined, with an undo command |
-| O | `harden\Disconnect-Sessions.ps1` | List, then log off RDP/console, SMB, WinRM, SSH sessions of named users (or everyone but you) |
+| X | `harden\Disconnect-Sessions.ps1` | List, then log off RDP/console, SMB, WinRM, SSH sessions of named users (or everyone but you) |
 | I | `hunt\New-IncidentReport.ps1` | Ranks candidate attacker IPs and writes a facts-only worksheet: timeline, removals with hashes, live sessions, IIS requests |
 
 ### Backup & logging

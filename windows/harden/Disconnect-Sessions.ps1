@@ -91,11 +91,15 @@ if ($n -eq 0) { Write-Finding -Level INFO -Category 'Session' -Message 'No inter
 # ---------------------------------------------------------------------------
 Write-Section 'SMB sessions (who is connected to our shares)'
 # ---------------------------------------------------------------------------
+$script:myAddrs = @(Get-CcdcLocalIps | ForEach-Object { $_ -replace '%.*$', '' })
 if (Get-Command Get-SmbSession -ErrorAction SilentlyContinue) {
     $smb = @(Get-SmbSession -ErrorAction SilentlyContinue)
     if ($smb.Count -eq 0) { Write-Finding -Level INFO -Category 'SMB' -Message 'No SMB sessions.' }
     foreach ($s in $smb) {
-        Write-Finding -Level YELLOW -Category 'SMB' -Message ("{0} from {1} ({2} open files)" -f $s.ClientUserName, $s.ClientComputerName, $s.NumOpens)
+        # The box talking to itself (machine account, or one of our own addresses) is Group Policy / SYSVOL, not a person.
+        $client = ([string]$s.ClientComputerName).Trim('[', ']') -replace '%.*$', ''
+        $self = ([string]$s.ClientUserName -like "*\$($env:COMPUTERNAME)$") -or ($script:myAddrs -contains $client)
+        Write-Finding -Level $(if ($self) { 'INFO' } else { 'YELLOW' }) -Category 'SMB' -Message ("{0} from {1} ({2} open files){3}" -f $s.ClientUserName, $s.ClientComputerName, $s.NumOpens, $(if ($self) { '   <- this machine itself (Group Policy / SYSVOL)' } else { '' }))
         if (-not $acting -or -not (Test-Selected ([string]$s.ClientUserName))) { continue }
         $smbId = $s.SessionId
         $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target "$($s.ClientUserName) from $($s.ClientComputerName)" -Action 'Close SMB session' -ScriptBlock {
