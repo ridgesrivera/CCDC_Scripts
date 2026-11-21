@@ -292,7 +292,7 @@ function Compare-Snapshot($base, $now) {
         # The task runs as SYSTEM with no window, so tell whoever is logged on.
         try { $null = & msg.exe * /TIME:120 ("CCDC Watch-Changes on {0}: {1} RED change(s) since baseline. See C:\ccdc\alerts\alerts_{0}.csv or run hunt\Watch-Changes.ps1" -f $env:COMPUTERNAME, $red) 2>&1 } catch { $null = $_ }
     }
-    if ($changes -gt 0) { Write-Finding -Level INFO -Category 'Next' -Message 'Remove what is hostile: hunt\Remove-Persistence.ps1 / harden\Disable-Accounts.ps1.  Accept what is yours: -Mode Baseline' }
+    if ($changes -gt 0) { Write-Finding -Level INFO -Category 'Next' -Message 'Remove what is hostile: hunt\Remove-Persistence.ps1 / hunt\Kick-Block.ps1.  Accept what is yours: -Mode Baseline' }
 }
 
 # ---------------------------------------------------------------------------

@@ -1,202 +1,184 @@
 <#
 .SYNOPSIS
-    Set-Firewall - all profiles on, default-deny inbound, allowlist scored ports, never lock yourself out. CHANGES STATE.
+    Set-Firewall - a very basic Windows Firewall, step by step, that keeps every service working. CHANGES STATE, one-step revert.
 
 .DESCRIPTION
     PURPOSE
-      Make the Windows Firewall actually enforce something without breaking
-      scored services or your own RDP/WinRM session.
+      Turn the firewall on without taking down your own services or locking
+      yourself out. Keep it simple:
+        * Everything this box is serving RIGHT NOW stays reachable from anywhere
+          (an allow rule for every listening port, so nothing on the board breaks).
+        * Windows' own built-in allow rules stay as they are (AD, DNS, file sharing...).
+        * Everything else coming IN is blocked. Outbound is left open.
+        * Dropped connections are logged, so you can see what is being blocked.
 
-    STEPS (each one asks y/N unless -Force; -WhatIf shows them all)
-      1. Export the current firewall policy (backup) with netsh.
-      2. Add "CCDC Allowlist" rules for every -AllowTcp / -AllowUdp port
-         (default: this host's scoredPorts from config). -Preset DC adds the
-         ports Active Directory needs.
-      3. Add a "CCDC Admin" rule for RDP/WinRM (+SSH if sshd exists) from
-         -AdminSources PLUS the IP of every currently connected admin session.
-      4. Schedule a ONE-TIME rollback task (-RollbackMinutes, default 5) that
-         re-imports the backup. If you get locked out, wait and it undoes itself.
-      5. Turn on all profiles, inbound default = Block, outbound = Allow, log drops.
-      6. Optional -DisableOtherInboundRules: DISABLE (not delete) every other
-         enabled inbound allow rule, so only the allowlist remains.
-      7. Ask you to test a NEW connection; on "yes" the rollback task is removed.
+    STEPS (each one asks first)
+      1. Save the current firewall (netsh export) so it can be put back exactly.
+      2. Show every listening port + process; you can untick any you do not want open.
+      3. Add "CCDC Allow" rules for them (+ RDP/WinRM/SSH for your own access).
+      4. Start a SAFETY TIMER: if you do not confirm within -RevertMinutes (3),
+         the firewall is put back automatically. Protects you from locking yourself out.
+      5. Turn the firewall on (all profiles): inbound = block, outbound = allow.
+      6. You open a NEW RDP/SSH window to test. It works? Confirm: the timer is cancelled.
 
-    IMPORTANT CONCEPT FOR STUDENTS
-      "Default inbound = Block" only blocks traffic that NO allow rule matches.
-      Windows ships allow rules for every role you install (AD, DNS, IIS...),
-      so step 5 alone rarely breaks a service - and is also NOT a true allowlist.
-      Step 6 is what makes it an allowlist; that is where things break, so it
-      is opt-in and fully reversible.
-
-    WHAT IT READS    current sessions (Get-NetTCPConnection), firewall rules, config\ccdc.json
-    WHAT IT CHANGES  firewall profiles + rules, one temporary scheduled task (CCDC-Firewall-Rollback)
-    HOW TO UNDO      netsh advfirewall import "C:\ccdc\backups\<stamp>\firewall.wfw"
-                     (the path is printed and logged), or wait for the rollback task.
+    WHAT IT READS    listening ports, firewall rules and profiles
+    WHAT IT CHANGES  firewall profiles + "CCDC Allow" rules + one temporary task (CCDC-Firewall-Revert)
+    HOW TO UNDO      .\Set-Firewall.ps1 -Revert           (puts back the firewall exactly as it was)
+                     panel 11 -> 2 does the same.
 
     MANUAL EQUIVALENT
       netsh advfirewall export C:\ccdc\fw-before.wfw
-      netsh advfirewall set allprofiles state on
-      netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound
       netsh advfirewall firewall add rule name="CCDC Allow TCP 80" dir=in action=allow protocol=TCP localport=80
-      netsh advfirewall firewall add rule name="CCDC Admin" dir=in action=allow protocol=TCP localport=3389 remoteip=192.168.100.0/24
+      netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound
+      netsh advfirewall set allprofiles state on
+      Undo:  netsh advfirewall import C:\ccdc\fw-before.wfw
+
+.PARAMETER Revert
+    Put the firewall back to the newest saved copy (from step 1).
+
+.PARAMETER Status
+    Show profiles, CCDC rules and the saved copies. Changes nothing.
+
+.PARAMETER RevertMinutes
+    Safety timer length. Default 3.
 
 .EXAMPLE
-    .\Set-Firewall.ps1 -AllowTcp 80,443 -WhatIf
+    .\Set-Firewall.ps1            # guided
 .EXAMPLE
-    .\Set-Firewall.ps1 -Preset DC -AdminSources 192.168.100.0/24
-.EXAMPLE
-    .\Set-Firewall.ps1 -AllowTcp 80,443 -DisableOtherInboundRules
+    .\Set-Firewall.ps1 -Revert
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [int[]]$AllowTcp = @(),
-    [int[]]$AllowUdp = @(),
-    [ValidateSet('None', 'DC')][string]$Preset = 'None',
-    [string[]]$AdminSources = @(),
-    [int[]]$AdminPorts = @(3389, 5985, 5986),
-    [switch]$DisableOtherInboundRules,
-    [ValidateRange(2, 60)][int]$RollbackMinutes = 5,
+    [switch]$Revert,
+    [switch]$Status,
+    [ValidateRange(1, 30)][int]$RevertMinutes = 3,
     [switch]$Force,
     [string]$ConfigPath
 )
+$null = $ConfigPath
 
 . "$PSScriptRoot\..\lib\CCDC-Common.ps1"
-Initialize-Ccdc -ScriptName 'Set-Firewall'
-$config  = Get-CcdcConfig -Path $ConfigPath
-$hostCfg = Get-CcdcHostConfig -Config $config
-$group   = 'CCDC Allowlist'
+Initialize-Ccdc -ScriptName 'Set-Firewall' -ReadOnly:$Status
+$saveDir = 'C:\ccdc\firewall'
+$task = 'CCDC-Firewall-Revert'
+$group = 'CCDC Allow'
+
+function Get-Saved { @(Get-ChildItem $saveDir -Filter 'before_*.wfw' -ErrorAction SilentlyContinue | Sort-Object Name) }
+function Show-FwState {
+    foreach ($l in (& netsh.exe advfirewall show allprofiles state 2>$null | Where-Object { $_ -match 'Profile Settings|^State' })) { Write-Host "    $l" }
+    $n = @(Get-NetFirewallRule -Group $group -ErrorAction SilentlyContinue).Count
+    Write-Host "    CCDC Allow rules: $n" -ForegroundColor DarkGray
+}
 
 # ---------------------------------------------------------------------------
-# Work out what to allow
-# ---------------------------------------------------------------------------
-if (-not $AllowTcp -and -not $AllowUdp -and $hostCfg) {
-    $AllowTcp = @($hostCfg.scoredPorts.tcp | Where-Object { $_ }); $AllowUdp = @($hostCfg.scoredPorts.udp | Where-Object { $_ })
-    Write-Finding -Level INFO -Category 'Plan' -Message "Using scored ports from config for '$($hostCfg.name)'"
-}
-if ($Preset -eq 'DC' -or (Test-CcdcIsDC)) {
-    if ($Preset -ne 'DC') { Write-Finding -Level YELLOW -Category 'Plan' -Message 'This is a DC - adding AD ports automatically (same as -Preset DC).' }
-    # DNS, Kerberos, RPC EPM, LDAP, SMB, kpasswd, LDAPS, GC, ADWS, + RPC dynamic range (AD replication/logons need it)
-    $AllowTcp += 53, 88, 135, 389, 445, 464, 636, 3268, 3269, 9389
-    $AllowUdp += 53, 88, 123, 389, 464
-    $dcRpcRange = '49152-65535'
-} else { $dcRpcRange = $null }
-if (Get-Service sshd -ErrorAction SilentlyContinue) { $AdminPorts += 22 }
-$AllowTcp   = @($AllowTcp | Sort-Object -Unique)
-$AllowUdp   = @($AllowUdp | Sort-Object -Unique)
-# A port that is SCORED (in -AllowTcp / config) must stay open to Any: the
-# scoring engine is often NOT in adminSources. So a scored RDP/SSH/WinRM port
-# gets an Any rule and is dropped from the restricted admin rule.
-$scoredAdmin = @($AdminPorts | Where-Object { $AllowTcp -contains $_ } | Sort-Object -Unique)
-$AdminPorts  = @($AdminPorts | Where-Object { $AllowTcp -notcontains $_ } | Sort-Object -Unique)
-if ($scoredAdmin) {
-    Write-Finding -Level YELLOW -Category 'Plan' -Message ("Scored admin port(s) {0} stay open to ANY source (scoring engine needs them). Protect them with strong passwords/NLA instead." -f ($scoredAdmin -join ', '))
-}
-if (-not $AllowTcp -and -not $AllowUdp) {
-    Write-Finding -Level RED -Category 'Plan' -Message 'No ports to allow. Pass -AllowTcp/-AllowUdp or add this host to config. Refusing to default-deny blind.'
+if ($Status) {
+    Write-Section 'Firewall status'
+    Show-FwState
+    foreach ($f in (Get-Saved)) { Write-Finding -Level INFO -Category 'Saved' -Message $f.FullName }
     Complete-Ccdc; return
 }
 
-# Who is connected right now? Their IPs are ALWAYS allowed on admin ports.
-$liveAdmins = @(Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue |
-    Where-Object { ($AdminPorts + $scoredAdmin) -contains [int]$_.LocalPort -and $_.RemoteAddress -notmatch '^(127\.|::1$)' } |
-    ForEach-Object { $_.RemoteAddress } | Sort-Object -Unique)
-if (-not $AdminSources -and $config -and $config.adminSources) { $AdminSources = @($config.adminSources) }
-if (-not $AdminSources) { $AdminSources = @('LocalSubnet') }   # firewall keyword = this box's own subnet(s)
-$adminRemote = @($AdminSources + $liveAdmins | Sort-Object -Unique)
-
-Write-Finding -Level INFO -Category 'Plan' -Message ("Allow TCP: {0}" -f ($AllowTcp -join ', '))
-Write-Finding -Level INFO -Category 'Plan' -Message ("Allow UDP: {0}" -f $(if ($AllowUdp) { $AllowUdp -join ', ' } else { '(none)' }))
-if ($dcRpcRange) { Write-Finding -Level INFO -Category 'Plan' -Message "Allow TCP RPC dynamic: $dcRpcRange (needed by AD)" }
-Write-Finding -Level INFO -Category 'Plan' -Message ("Admin ports {0} from: {1}" -f ($AdminPorts -join ','), ($adminRemote -join ', '))
-if ($liveAdmins) { Write-Finding -Level GREEN -Category 'Plan' -Message ("Your live session(s) from {0} will stay allowed" -f ($liveAdmins -join ', ')) }
-else { Write-Finding -Level YELLOW -Category 'Plan' -Message 'No live RDP/WinRM/SSH session detected (console?). Admin access limited to the sources above.' }
-
 # ---------------------------------------------------------------------------
-# 1. Backup
-# ---------------------------------------------------------------------------
-$backup = $null
-if (-not $WhatIfPreference) {
-    $backup = Join-Path (Get-CcdcBackupDir) 'firewall.wfw'
-    $null = & netsh advfirewall export "$backup" 2>&1
-    if ($LASTEXITCODE -eq 0) { Write-Finding -Level GREEN -Category 'Backup' -Message "Firewall policy exported to $backup" -Detail "Undo: netsh advfirewall import `"$backup`"" ; Write-CcdcLog "UNDO: netsh advfirewall import `"$backup`"" 'CHANGE' }
-    else { Write-Finding -Level RED -Category 'Backup' -Message 'Firewall export FAILED - stopping (no backup, no changes).'; Complete-Ccdc; return }
-}
-
-# ---------------------------------------------------------------------------
-# 2-3. Allow rules (added BEFORE default-deny so nothing drops in between)
-# ---------------------------------------------------------------------------
-function Add-AllowRule([string]$DisplayName, [string]$Proto, [string[]]$Ports, [string[]]$Remote = @('Any')) {
-    if (Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue) {
-        Write-Finding -Level INFO -Category 'Rule' -Message "exists: $DisplayName"; return
+if ($Revert) {
+    Write-Section 'Revert the firewall'
+    $f = (Get-Saved | Select-Object -Last 1)
+    if (-not $f) { Write-Finding -Level RED -Category 'Revert' -Message "No saved firewall in $saveDir. Turn it off by hand if needed: netsh advfirewall set allprofiles state off"; Complete-Ccdc; return }
+    $file = $f.FullName
+    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'Windows Firewall' -Action "Put back exactly as saved in $file" -ScriptBlock {
+        $o = & netsh.exe advfirewall import "$file" 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o -join ' ') }
+        $null = & schtasks.exe /Delete /TN $task /F 2>&1
     }
-    [void](Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target $DisplayName -Action 'Add inbound allow rule' `
-        -Undo "Remove-NetFirewallRule -DisplayName '$DisplayName'" -ScriptBlock {
-            New-NetFirewallRule -DisplayName $DisplayName -Group $group -Direction Inbound -Action Allow `
-                -Protocol $Proto -LocalPort $Ports -RemoteAddress $Remote -Profile Any | Out-Null
-        })
-}
-foreach ($p in $AllowTcp) { Add-AllowRule "CCDC Allow TCP $p" 'TCP' @("$p") }
-foreach ($p in $AllowUdp) { Add-AllowRule "CCDC Allow UDP $p" 'UDP' @("$p") }
-if ($dcRpcRange) { Add-AllowRule "CCDC Allow TCP RPC $dcRpcRange" 'TCP' @($dcRpcRange) }
-if ($AdminPorts) { Add-AllowRule ("CCDC Admin TCP {0}" -f ($AdminPorts -join ',')) 'TCP' ($AdminPorts | ForEach-Object { "$_" }) $adminRemote }
-
-# ---------------------------------------------------------------------------
-# 4. Safety net: scheduled rollback (interactive runs only)
-# ---------------------------------------------------------------------------
-$taskName = 'CCDC-Firewall-Rollback'
-$rollbackSet = $false
-if ($backup -and -not $Force) {
-    $rollbackSet = Invoke-CcdcChange -Cmdlet $PSCmdlet -Target $taskName -Action "Schedule automatic rollback in $RollbackMinutes min" `
-        -Undo "Unregister-ScheduledTask -TaskName $taskName -Confirm:`$false" -ScriptBlock {
-            $act  = New-ScheduledTaskAction -Execute 'netsh.exe' -Argument "advfirewall import `"$backup`""
-            $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes($RollbackMinutes)
-            Register-ScheduledTask -TaskName $taskName -Action $act -Trigger $trig -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
-        }
-} elseif ($Force) {
-    Write-Finding -Level YELLOW -Category 'Safety' -Message '-Force: no automatic rollback scheduled. Keep the console/another session open.'
+    Show-FwState
+    Complete-Ccdc; return
 }
 
 # ---------------------------------------------------------------------------
-# 5. Profiles: on, block inbound by default, log drops
-# ---------------------------------------------------------------------------
-[void](Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'Domain,Private,Public profiles' -Action 'Enable firewall, inbound=Block, outbound=Allow, log blocked' `
-    -Undo "netsh advfirewall import <backup>" -ScriptBlock {
-        Set-NetFirewallProfile -Profile Domain, Private, Public -Enabled True -DefaultInboundAction Block -DefaultOutboundAction Allow `
-            -LogBlocked True -LogFileName '%systemroot%\system32\LogFiles\Firewall\pfirewall.log' -LogMaxSizeKilobytes 16384
-    })
+Write-Section 'Step 1: save the current firewall'
+if (-not (Test-Path $saveDir)) { New-Item -ItemType Directory -Path $saveDir -Force -WhatIf:$false | Out-Null }
+$backup = Join-Path $saveDir ("before_{0}.wfw" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+if (-not $WhatIfPreference) {
+    $o = & netsh.exe advfirewall export "$backup" 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Finding -Level RED -Category 'Backup' -Message "Could not save the firewall, stopping: $o"; Complete-Ccdc; return }
+    Write-Finding -Level GREEN -Category 'Backup' -Message "Saved: $backup   (undo any time: .\Set-Firewall.ps1 -Revert)"
+}
+Write-Host '  Now:' -ForegroundColor White; Show-FwState
 
 # ---------------------------------------------------------------------------
-# 6. Optional: disable everything else (true allowlist)
+Write-Section 'Step 2: what this box is serving right now'
+$procName = @{}; foreach ($p in (Get-Process -ErrorAction SilentlyContinue)) { $procName[$p.Id] = $p.ProcessName }
+$tcp = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -notmatch '^(127\.|::1$)' -and [int]$_.LocalPort -lt 49152 } | Sort-Object LocalPort -Unique)
+$udp = @()
+if (Get-Command Get-NetUDPEndpoint -ErrorAction SilentlyContinue) {
+    $udp = @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -notmatch '^(127\.|::1$)' -and [int]$_.LocalPort -lt 49152 -and $_.LocalPort -notin 5353, 5355, 1900, 3702 } | Sort-Object LocalPort -Unique)
+}
+$allowTcp = @(); $allowUdp = @()
+foreach ($l in $tcp) { $allowTcp += [int]$l.LocalPort; Write-Host ("    TCP {0,-6} {1}" -f $l.LocalPort, $procName[[int]$l.OwningProcess]) }
+foreach ($l in $udp) { $allowUdp += [int]$l.LocalPort; Write-Host ("    UDP {0,-6} {1}" -f $l.LocalPort, $procName[[int]$l.OwningProcess]) -ForegroundColor DarkGray }
+# Your own way back in, even if it is not listening right now.
+foreach ($p in 3389, 5985, 22) { if ($allowTcp -notcontains $p -and (Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)) { $allowTcp += $p } }
+if (-not $Force) {
+    $drop = Read-Host '  All of these stay open. Type ports to LEAVE CLOSED (comma separated), or Enter to keep all'
+    if ($drop) {
+        $d = @($drop -split '[,\s]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+        if ($d -contains 3389 -or $d -contains 22 -or $d -contains 5985) { Write-Host '  You are closing a remote-access port. If that is how YOU are connected, you will be cut off (the timer will put it back).' -ForegroundColor Yellow }
+        $allowTcp = @($allowTcp | Where-Object { $d -notcontains $_ }); $allowUdp = @($allowUdp | Where-Object { $d -notcontains $_ })
+    }
+}
+$allowTcp = @($allowTcp | Sort-Object -Unique); $allowUdp = @($allowUdp | Sort-Object -Unique)
+
 # ---------------------------------------------------------------------------
-if ($DisableOtherInboundRules) {
-    $others = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue | Where-Object { $_.Group -ne $group })
-    Write-Finding -Level YELLOW -Category 'Rule' -Message "$($others.Count) other enabled inbound allow rules would be DISABLED (not deleted)."
-    $others | Select-Object -First 15 | ForEach-Object { Write-Host "       $($_.DisplayName)" -ForegroundColor DarkGray }
-    if ($others.Count -gt 15) { Write-Host "       ... and $($others.Count - 15) more" -ForegroundColor DarkGray }
-    $rbFile = $script:CcdcLogFile -replace '\.log$', '_reenable.ps1'
-    $ok = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target "$($others.Count) inbound rules" -Action 'Disable all non-CCDC inbound allow rules' `
-        -Undo "run $rbFile" -ScriptBlock {
-            # Write the re-enable list FIRST, so a failure halfway is still recoverable.
-            $others | ForEach-Object { "Enable-NetFirewallRule -Name '$($_.Name)'" } | Set-Content -Path $rbFile -Encoding UTF8
-            $others | Disable-NetFirewallRule
-        }
-    if ($ok) { Write-Finding -Level INFO -Category 'Rule' -Message "Re-enable script: $rbFile" }
+Write-Section 'Step 3: allow rules for those ports (from anywhere)'
+foreach ($port in $allowTcp) {
+    $pt = $port
+    if (Get-NetFirewallRule -DisplayName "CCDC Allow TCP $pt" -ErrorAction SilentlyContinue) { continue }
+    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$true -Target "TCP $pt" -Action 'Allow inbound' -ScriptBlock {
+        $null = New-NetFirewallRule -DisplayName "CCDC Allow TCP $pt" -Group $group -Direction Inbound -Protocol TCP -LocalPort $pt -Action Allow -ErrorAction Stop
+    }
+}
+foreach ($port in $allowUdp) {
+    $pt = $port
+    if (Get-NetFirewallRule -DisplayName "CCDC Allow UDP $pt" -ErrorAction SilentlyContinue) { continue }
+    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$true -Target "UDP $pt" -Action 'Allow inbound' -ScriptBlock {
+        $null = New-NetFirewallRule -DisplayName "CCDC Allow UDP $pt" -Group $group -Direction Inbound -Protocol UDP -LocalPort $pt -Action Allow -ErrorAction Stop
+    }
+}
+Write-Finding -Level INFO -Category 'Rules' -Message ("Allowed TCP {0}; UDP {1}. Windows' built-in rules (AD, DNS, file sharing) are untouched." -f ($allowTcp -join ','), $(if ($allowUdp) { $allowUdp -join ',' } else { '-' }))
+
+# ---------------------------------------------------------------------------
+Write-Section "Step 4: safety timer ($RevertMinutes min)"
+if (-not $WhatIfPreference) {
+    $when = (Get-Date).AddMinutes($RevertMinutes).ToString('HH:mm')
+    # No quotes inside /TR (Windows PowerShell mangles embedded quotes); the path has no spaces.
+    $cmd = "netsh advfirewall import $backup"
+    $o = & schtasks.exe /Create /TN $task /TR "cmd.exe /c $cmd & schtasks /Delete /TN $task /F" /SC ONCE /ST $when /RU SYSTEM /RL HIGHEST /F 2>&1
+    if ($LASTEXITCODE -eq 0) { Write-Finding -Level GREEN -Category 'Timer' -Message "If you do not confirm, the firewall is put back at $when." }
+    else { Write-Finding -Level YELLOW -Category 'Timer' -Message "Could not create the safety timer ($o). Keep a console session open in case." }
 }
 
 # ---------------------------------------------------------------------------
-# 7. Confirm connectivity, then cancel the rollback
+Write-Section 'Step 5: turn the firewall on (inbound block, outbound allow, log drops)'
+$ok = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'all profiles' -Action 'Firewall ON, block inbound, allow outbound' -Undo '.\Set-Firewall.ps1 -Revert' -ScriptBlock {
+    $o1 = & netsh.exe advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o1 -join ' ') }
+    $null = & netsh.exe advfirewall set allprofiles logging droppedconnections enable 2>&1
+    $o2 = & netsh.exe advfirewall set allprofiles state on 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o2 -join ' ') }
+}
+Show-FwState
+
 # ---------------------------------------------------------------------------
-if ($rollbackSet) {
-    Write-Host ""
-    Write-Host "  TEST NOW: open a NEW RDP/WinRM/SSH connection from your admin box AND check the scoreboard." -ForegroundColor Yellow
-    Write-Host "  If you do nothing, the firewall reverts automatically in $RollbackMinutes minutes." -ForegroundColor Yellow
-    $keep = Read-Host '  Type YES to keep the new rules'
-    if ($keep -ceq 'YES') {
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Finding -Level GREEN -Category 'Safety' -Message 'Rollback task removed - new rules kept.'
-        Write-CcdcLog "Rollback task $taskName removed by operator" 'CHANGE'
+Write-Section 'Step 6: test, then confirm'
+if ($ok -and -not $WhatIfPreference) {
+    Write-Host '  Open a NEW RDP / SSH connection to this box now (keep this window open).' -ForegroundColor Yellow
+    Write-Host '  Check the scoreboard / your services too.' -ForegroundColor Yellow
+    $a = Read-Host '  Did the new connection work and are services fine? Type YES to keep the firewall'
+    if ($a -ceq 'YES') {
+        $null = & schtasks.exe /Delete /TN $task /F 2>&1
+        Write-Finding -Level GREEN -Category 'Done' -Message 'Kept. Safety timer cancelled. Undo any time: panel 11 -> 2 (or .\Set-Firewall.ps1 -Revert).'
+        Write-Finding -Level INFO -Category 'Done' -Message 'Dropped connections are logged in %windir%\System32\LogFiles\Firewall\pfirewall.log'
     } else {
-        Write-Finding -Level YELLOW -Category 'Safety' -Message "Rollback still scheduled. To revert now: netsh advfirewall import `"$backup`""
+        Write-Host '  Not confirmed: reverting now.' -ForegroundColor Yellow
+        $o = & netsh.exe advfirewall import "$backup" 2>&1
+        $null = & schtasks.exe /Delete /TN $task /F 2>&1
+        Write-Finding -Level YELLOW -Category 'Done' -Message "Firewall put back as it was. $o"
     }
 }
 Complete-Ccdc

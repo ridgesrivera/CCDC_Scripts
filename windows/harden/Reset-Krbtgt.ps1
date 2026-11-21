@@ -155,6 +155,6 @@ if ($number -eq 1) {
         -Detail "Until then the STOLEN key still works as the 'previous' key.`nMeanwhile: rotate admin passwords (harden\Rotate-Passwords.ps1 -Group `"Domain Admins`"), watch the scoreboard.`nThen run this script again."
 } else {
     Write-Finding -Level GREEN -Category 'Next' -Message 'Both resets done: tickets forged with the old key are dead.' `
-        -Detail "Now: rotate every admin and service account password, check scored services (hunt\Test-ScoredServices.ps1),`nand if Zerologon was involved reset the DC machine account too: Reset-ComputerMachinePassword (on each DC).`nWrite it up: hunt\New-IncidentReport.ps1"
+        -Detail "Now: rotate every admin and service account password, check your services still work,`nand if Zerologon was involved reset the DC machine account too: Reset-ComputerMachinePassword (on each DC).`nWrite it up: hunt\New-IncidentReport.ps1"
 }
 Complete-Ccdc

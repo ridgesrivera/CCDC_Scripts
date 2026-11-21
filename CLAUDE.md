@@ -28,14 +28,21 @@ competition, and for teaching newer club members. Read `README.md` (hard rules, 
 CCDC-Toolkit.bat             root launcher -> windows/Launch-Toolkit.bat (self-elevates, unblocks, opens panel)
 install.ps1                  one-line download/installer (irm ... | iex) -> C:\ccdc\toolkit
 windows/Launch-Toolkit.ps1   the panel: $menu table (Key/Sec/Name/File/RO/Desc) + Get-ScriptParams + Invoke-Entry;
-                             status header (Get-AlertStatus), [0] guided first-15 (Invoke-FirstSteps),
-                             [D] -> Invoke-LiveAlerts, loops (-Loop) open in a new window (Start-InNewWindow)
+                             status header (Get-AlertStatus), [0] first-15 = START-ONLY steps (Invoke-FirstSteps),
+                             submenus: D Invoke-LiveAlerts, X Invoke-KickMenu, 11 Invoke-FirewallMenu, 12 Invoke-WalkthroughMenu
 windows/lib/CCDC-Common.ps1  shared helpers for recon/audit/harden/... (NOT used by windows/alerts): findings, logging,
                              Invoke-CcdcChange, backups, registry catalog (Get-CcdcRegCatalog), snapshots
 windows/lib/Compat.ps1       stand-ins for Get-NetTCPConnection / Get-NetIPAddress / Get-LocalGroupMember on old Windows
 windows/backup/Snapshot-State.ps1  Take / Compare / Restore. The panel auto-takes ORIGINAL on first run and a snapshot
                              before every changing entry (except $noAutoSnapshot). Compare attributes each change to
                              the toolkit by matching CHANGED lines in C:\ccdc\logs (Get-CcdcToolkitChanges).
+windows/harden/Harden-Walkthrough.ps1  THE hardening tool: data-driven $steps (reg steps: Key/Name/Value/Default,
+                             custom: Check/Apply). Every apply writes structured undo data to C:\ccdc\hardening-undo.csv
+                             (never code). On a DC reg steps also go into GPO 'CCDC Hardening' (Domain Controllers OU).
+windows/harden/Set-Firewall.ps1  BASIC firewall: allow all listening ports, block other inbound, safety timer, -Revert.
+windows/hunt/Find-Attacks.ps1  Red Team response: logon attempts on every service + attack checks, each with steps.
+windows/hunt/Find-Beacons.ps1  C2 beacon scan (sampled connections, pipes, DNS cache).
+windows/hunt/Kick-Block.ps1  kick user (log off + disable) / block IP (in+out), journal C:\ccdc\kick-block.csv, undo.
 windows/audit/Audit-Vulns.ps1  each check = Applies + Eval(param $S) run against live state AND a snapshot. Only read
                              registry keys that are inside Get-CcdcRegCatalog, or the BEFORE column shows '?'
 windows/alerts/              LIVE ALERTS bundle: standalone on purpose (see below)
@@ -62,8 +69,10 @@ docs/events/                 per-event notes from team packets (box roles, scori
   Do not make it dot-source `CCDC-Common.ps1` or depend on other repo files. Keep it bare-bones and
   low-overhead (no sound, no tray icons, no background loops besides `-Watch`).
 
-## Panel keys (v3.1)
-MONITOR D C N · SNAPSHOT S W U · AUDIT 1-9 E T A · HARDEN 10-17 · RESPOND R X I · BACKUP B K L · 0 guided · ?<key> · H help.
+## Panel keys (v3.2)
+MONITOR D N · RED TEAM RESPONSE E X R I · SNAPSHOT S W U · AUDIT 1-8 A · HARDEN 10-15 · BACKUP B P L · 0 first-15 · ?<key> · H help.
+Ridge's direction: keep it small (replace, don't add), no scoring guesswork / points language in output, everything that
+can break a service must be reversible, first-15 does start-of-competition steps ONLY.
 Docs reference these keys; update README, docs/first-15-minutes-windows.md and docs/events/* when they change.
 
 ## Gotchas already paid for (do not reintroduce)
@@ -98,10 +107,9 @@ Docs reference these keys; update README, docs/first-15-minutes-windows.md and d
 3. CHAIN links by IP only. Consider also linking by account (who) for SYSTEM/webshell activity, without noise.
 4. `netlogon` only fires on NTLM (keeps DCs quiet). Consider a low-noise Kerberos rule (e.g. type 3 from IPs
    never seen before) if it can stay quiet on a busy DC.
-5. Roles are now split in the panel: `D` bt-alerts = the live monitor; `E` Watch-Events = look-back sweep of the
-   event logs (its -Loop mode still works but is not offered by the panel, to avoid two live monitors);
-   `N` whoshere = one screen now; `W` Watch-Changes = periodic diff. Consider folding Watch-Events detections
-   that bt-alerts lacks (DCSync, Zerologon, GPO edits, web-server-spawns-shell) into bt-alerts as triggers.
+5. Roles: `D` bt-alerts = live; `E` Find-Attacks = look-back + response steps; `N` whoshere = every way in, now;
+   `W` Watch-Changes = footprint diff. Consider adding live triggers to bt-alerts for what only Find-Attacks sees
+   (DCSync 4662, web server spawning a shell, Zerologon 5827-5829).
 6. `pii-hunt.ps1` overlaps `audit/Audit-SensitiveFiles.ps1`; panel `8` offers both (deep file scan vs quick hunt incl. SQL Server).
 9. Snapshot restore covers registry/services/users/groups/shares/hosts/Defender/firewall/audit/secpol. Not covered:
    scheduled tasks and WMI persistence (use `R` Remove-Persistence), IIS/app config (use `K` per-service restore).

@@ -5,10 +5,12 @@ Do preserve *before* remove: the evidence is what earns points on an incident re
 
 Start an IR note on paper (or the team doc) right away: **time found, box, who found it, what you saw.**
 
+**Don't know what happened?** Panel **E** (`hunt\Find-Attacks.ps1`) reads the logs, names the attack and lists the steps.
+
 **The fast path (scripts do preserve + record for you):**
 1. `hunt\Remove-Persistence.ps1`: pick the item from the list. It exports it, hashes the payload, looks up who created it and from which IP, then disables/quarantines it.
-2. `harden\Disable-Accounts.ps1` + `harden\Disconnect-Sessions.ps1 -User <name>` for the account they used; rotate what it could read.
-3. `hunt\New-IncidentReport.ps1 -Title "..."`: candidate source IPs, timeline, what was removed. Fill in the wording yourselves and submit **with the source IP and the box's public 10.100.1XX.Y address**. A report without a source IP earns nothing.
+2. `hunt\Kick-Block.ps1 -User <name> -DisableAccount -BlockIp <ip>` (panel X) for the account they used; rotate what it could read.
+3. `hunt\New-IncidentReport.ps1 -Title "..."`: candidate source IPs, timeline, what was removed. Fill in the wording yourselves and submit **with the source IP and the box's public 10.100.1XX.Y address**. A report without a source IP is much less useful.
 4. Domain admin was compromised? `harden\Reset-Krbtgt.ps1`, wait, run it again.
 
 The tables below are the same steps by hand.
@@ -19,7 +21,7 @@ The tables below are the same steps by hand.
 
 | Step | Do | Command |
 |------|----|---------|
-| Contain | Disable it (don't delete) | `harden\Disable-Accounts.ps1 -Users hacker` |
+| Contain | Disable it (don't delete) | panel X (`hunt\Kick-Block.ps1 -User hacker -DisableAccount`) |
 | Contain | Kick live sessions | `quser` then `logoff <ID>` |
 | Preserve | Record who created it and when | `audit\Audit-Users.ps1` (Security log 4720/4728/4732 section) · `Get-ADUser hacker -Properties whenCreated,memberOf` |
 | Remove | Take it out of privileged groups | `Remove-ADGroupMember "Domain Admins" hacker` / `net localgroup administrators hacker /delete` |

@@ -138,7 +138,7 @@ $checks = @(
            if (-not (Test-Patched '2021-02-09') -and $fscp -ne 1) { return (New-Risk 'patched, but enforcement mode is off (FullSecureChannelProtection != 1)') }
            New-Ok 'patched and enforced' } }
     @{ Id = 'PrintNightmare'; Cve = 'CVE-2021-34527'; Name = 'PrintNightmare / Spooler coercion'; Applies = { $true }; Tokens = @('Spooler')
-       Fix = 'Panel 13 (module DisableSpoolerOnDC) or: Stop-Service Spooler; Set-Service Spooler -StartupType Disabled'
+       Fix = 'Panel 12 (walkthrough step SpoolerDC) or: Stop-Service Spooler; Set-Service Spooler -StartupType Disabled'
        Eval = { param($S)
            $sp = Get-SSvc $S 'Spooler'
            if ((Get-SReg $S $P_PNP 'NoWarningNoElevationOnInstall') -eq 1) { return (New-Vuln 'Point and Print NoWarningNoElevationOnInstall=1: exploitable even when patched') }
@@ -148,7 +148,7 @@ $checks = @(
            if (Test-SvcOn $sp) { return (New-Risk "Spooler $($sp.State)/$($sp.StartMode): disable it if nothing on this box prints") }
            New-Ok 'Spooler stopped and not automatic' } }
     @{ Id = 'EternalBlue'; Cve = 'MS17-010'; Name = 'EternalBlue (SMBv1 RCE)'; Applies = { $true }; Tokens = @('SMB1')
-       Fix = 'Panel 13 (module DisableSMBv1) or: Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force'
+       Fix = 'Panel 12 (walkthrough step SMBv1) or: Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force'
        Eval = { param($S)
            $smb1 = Get-SFact $S 'Smb1Server'
            if ($smb1 -and -not (Test-Patched '2017-03-14')) { return (New-Vuln 'SMBv1 ON and no update since March 2017: remote SYSTEM') }
@@ -161,7 +161,7 @@ $checks = @(
            if ((Get-SReg $S $P_SRV 'DisableCompression') -eq 1) { return (New-Risk 'unpatched, but compression disabled (workaround)') }
            New-Vuln 'build 1903/1909, unpatched, SMBv3 compression on: remote SYSTEM' } }
     @{ Id = 'BlueKeep'; Cve = 'CVE-2019-0708'; Name = 'BlueKeep (RDP RCE, 2008 R2 / 7)'; Applies = { $X.Build -le 7601 }; Tokens = @('UserAuthentication', 'fDenyTSConnections')
-       Fix = 'Patch (KB4499175), or require NLA (panel 13 module RequireRdpNla), or disable RDP'
+       Fix = 'Patch (KB4499175), or require NLA (panel 12 step RdpNla), or disable RDP'
        Eval = { param($S)
            if ((Get-SReg $S $P_TS 'fDenyTSConnections') -eq 1) { return (New-Ok 'RDP disabled') }
            if (Test-Patched '2019-05-14') { return (New-Ok 'patched') }
@@ -175,7 +175,7 @@ $checks = @(
            if ($t -and [int]$t -le 0xFF00) { return (New-Risk 'unpatched, TcpReceivePacketSize workaround in place') }
            New-Vuln 'DNS server unpatched since July 2020: wormable remote SYSTEM on the DC' } }
     @{ Id = 'noPac'; Cve = 'CVE-2021-42278/42287'; Name = 'noPac (any user -> Domain Admin)'; Applies = { $X.IsDC }; Tokens = @('MachineAccountQuota')
-       Fix = 'Patch. Panel 13 module MachineAccountQuotaZero blunts it'
+       Fix = 'Patch. Panel 12 step MAQ blunts it'
        Eval = { param($S)
            if (-not (Test-Patched '2021-11-09')) { return (New-Vuln "DC not patched since Nov 2021 (MachineAccountQuota=$($X.Maq))") }
            if ($X.Maq -gt 0) { return (New-Risk "patched; MachineAccountQuota=$($X.Maq) still lets any user add computers (RBCD / KrbRelayUp)") }
@@ -233,7 +233,7 @@ $checks = @(
        Fix = 'Patch (Dec 2024+). Watch for DCs rebooting: the public exploit crashes LSASS'
        Eval = { param($S) if (Test-Patched '2024-12-10') { New-Ok 'patched' } else { New-Vuln 'DC unpatched since Dec 2024: unauthenticated LSASS crash (DC reboots) / RCE' } } }
     @{ Id = 'SMBReflect'; Cve = 'CVE-2025-33073'; Name = 'SMB NTLM reflection (user -> SYSTEM)'; Applies = { $true }; Tokens = @('RequireSecuritySignature')
-       Fix = 'Patch (June 2025+), or require SMB signing (panel 13 module RequireSMBSigning)'
+       Fix = 'Patch (June 2025+), or require SMB signing (panel 12 step SMBSigning)'
        Eval = { param($S)
            if (Test-Patched '2025-06-10') { return (New-Ok 'patched') }
            if ((Get-SReg $S $P_SRV 'RequireSecuritySignature') -eq 1) { return (New-Risk 'unpatched, but SMB signing is required (blocks the reflection)') }
@@ -246,7 +246,7 @@ $checks = @(
            if ($i -ne 2) { return (New-Risk 'channel binding on, signing not required') }
            New-Ok 'LDAP signing required' } }
     @{ Id = 'SMBSign'; Cve = 'relay'; Name = 'SMB signing (relay)'; Applies = { $true }; Tokens = @('RequireSecuritySignature', 'SMB')
-       Fix = 'Panel 13 module RequireSMBSigning. CAUTION on old clients'
+       Fix = 'Panel 12 step SMBSigning. CAUTION on old clients'
        Eval = { param($S)
            if ((Get-SReg $S $P_SRV 'RequireSecuritySignature') -eq 1) { return (New-Ok 'SMB signing required') }
            if ($X.IsDC) { return (New-Vuln 'DC does not require SMB signing (default is required: someone turned it off)') }
@@ -259,7 +259,7 @@ $checks = @(
            if ($n -eq 0) { return (New-Vuln 'NoLMHash=0: LM hashes stored for new passwords') }
            New-Ok ("NTLMv2 only (LmCompatibilityLevel={0})" -f $(if ($null -eq $l) { 'default 3' } else { $l })) } }
     @{ Id = 'Poisoning'; Cve = 'creds'; Name = 'LLMNR / NBT-NS poisoning (Responder)'; Applies = { $true }; Tokens = @('EnableMulticast', 'NetbiosOptions')
-       Fix = 'Panel 13 modules DisableLLMNR + DisableNBTNS'
+       Fix = 'Panel 12 steps LLMNR + NBTNS'
        Eval = { param($S)
            $llmnr = Get-SReg $S 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' 'EnableMulticast'
            $nbtOn = $false
@@ -269,17 +269,17 @@ $checks = @(
            if ($bad) { return (New-Risk (($bad -join ', ') + ': attackers on the LAN capture NTLM hashes')) }
            New-Ok 'LLMNR and NBT-NS off' } }
     @{ Id = 'WDigest'; Cve = 'creds'; Name = 'WDigest cleartext passwords in LSASS'; Applies = { $true }; Tokens = @('UseLogonCredential')
-       Fix = 'Panel 13 module DisableWDigest (UseLogonCredential=0)'
+       Fix = 'Panel 12 step WDigest (UseLogonCredential=0)'
        Eval = { param($S)
            $w = Get-SReg $S 'HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' 'UseLogonCredential'
            if ($w -eq 1) { return (New-Vuln 'UseLogonCredential=1: cleartext passwords in memory (Red Team sets this on purpose)') }
            if ($null -eq $w -and $X.Build -lt 9600) { return (New-Vuln 'not set on 2012/2008 R2 = cleartext caching ON by default') }
            New-Ok 'off' } }
     @{ Id = 'LsaPPL'; Cve = 'creds'; Name = 'LSA protection (RunAsPPL)'; Applies = { $X.Build -ge 9600 }; Tokens = @('RunAsPPL')
-       Fix = 'Panel 13 module EnableLSAProtection (needs a reboot to take effect)'
+       Fix = 'Panel 12 step LsaPPL (needs a reboot to take effect)'
        Eval = { param($S) if ([int](Get-SReg $S $P_LSA 'RunAsPPL') -ge 1) { New-Ok 'on (after reboot)' } else { New-Risk 'off: mimikatz reads LSASS directly' } } }
     @{ Id = 'Anonymous'; Cve = 'enum'; Name = 'Anonymous / null sessions / Guest'; Applies = { $true }; Tokens = @('RestrictAnonymous', 'EveryoneIncludesAnonymous', 'NullSession', 'Guest')
-       Fix = 'Lsa RestrictAnonymousSAM=1, EveryoneIncludesAnonymous=0, clear NullSessionShares/Pipes; panel 13 module DisableGuest'
+       Fix = 'Lsa RestrictAnonymousSAM=1, EveryoneIncludesAnonymous=0, clear NullSessionShares/Pipes; panel 12 steps AnonSAM, EveryoneAnon, Guest'
        Eval = { param($S)
            $bad = @()
            if ((Get-SReg $S $P_LSA 'RestrictAnonymousSAM') -eq 0) { $bad += 'RestrictAnonymousSAM=0' }
@@ -297,7 +297,7 @@ $checks = @(
            if ((Get-SReg $S $P_SYS 'LocalAccountTokenFilterPolicy') -eq 1) { return (New-Risk 'LocalAccountTokenFilterPolicy=1: local admin hashes work remotely (pass-the-hash)') }
            New-Ok 'ok' } }
     @{ Id = 'RdpNla'; Cve = 'access'; Name = 'RDP without NLA'; Applies = { $true }; Tokens = @('UserAuthentication')
-       Fix = 'Panel 13 module RequireRdpNla'
+       Fix = 'Panel 12 step RdpNla'
        Eval = { param($S)
            if ((Get-SReg $S $P_TS 'fDenyTSConnections') -eq 1) { return (New-Ok 'RDP disabled') }
            if ((Get-SReg $S $P_RDP 'UserAuthentication') -eq 0) { return (New-Risk 'RDP on without NLA: login screen exposed to anyone, BlueKeep-class bugs pre-auth') }
@@ -389,7 +389,7 @@ if ($X.AdcsInForest) {
             } catch { $lowPriv = @('(could not read template ACL)') }
             $n++
             $tn = $t.Properties['name'][0]
-            if ($lowPriv) { Write-Finding -Level RED -Category 'ESC1' -Message ("Template '{0}': requester supplies the subject, usable for logon, no approval, enrollable by {1}" -f $tn, (($lowPriv | Sort-Object -Unique) -join ', ')) -Detail 'Fix (certtmpl.msc): untick "Supply in the request", require CA manager approval, or remove their Enroll right. Locksmith (panel T) lists ESC1-ESC16.' }
+            if ($lowPriv) { Write-Finding -Level RED -Category 'ESC1' -Message ("Template '{0}': requester supplies the subject, usable for logon, no approval, enrollable by {1}" -f $tn, (($lowPriv | Sort-Object -Unique) -join ', ')) -Detail 'Fix (certtmpl.msc): untick "Supply in the request", require CA manager approval, or remove their Enroll right. PingCastle / Locksmith list ESC1-ESC16 if you have them.' }
             else { Write-Finding -Level YELLOW -Category 'ESC1' -Message "Template '$tn' is ESC1-shaped but only privileged groups can enroll" }
         }
         if ($n -eq 0) { Write-Finding -Level GREEN -Category 'ESC1' -Message 'No ESC1-shaped templates' }
