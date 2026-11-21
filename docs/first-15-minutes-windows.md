@@ -28,7 +28,7 @@ It does these, in order, asking before each one:
 | 1 | **Rotate admin passwords** (Administrator, Domain Admins). Write them on paper | `10` | Scored / service accounts: Password Change Request first. A service account used by another box breaks that box |
 | 2 | **Kick unknown admins** that step 5 flagged: log off + disable | `X` → `1` | Disable, never delete. Ask the team before touching an account you don't recognise but that might be a service |
 | 3 | **Hardening walkthrough**: apply the SAFE steps, read CAUTION ones | `12` | DANGER = evidence says it will break something: skip it |
-| 4 | **Basic firewall**: keeps everything that's listening open, blocks other inbound | `11` → `1` | Test a NEW RDP connection before typing YES. It auto-reverts in 3 min if you don't |
+| 4 | **Basic firewall**: keeps everything that's listening open, blocks other inbound | `11` → `1` | Test a NEW RDP connection before typing YES. It auto-reverts in 3 min if you don't. Undo any time: `11` → `2`, or run `C:\ccdc\firewall\revert.cmd` as admin |
 
 ## After 15 minutes
 
