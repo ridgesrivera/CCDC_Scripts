@@ -1,5 +1,9 @@
 # CLAUDE.md: notes for Claude Code working in this repo
 
+(Lives in `.claude/` so it is not downloaded to competition boxes. `dev/`, `.claude/`, `install.ps1` and the alerts
+paste are `export-ignore` in `.gitattributes`: the GitHub zip and install.ps1 deliver ONLY the live toolkit.
+New non-live files go in `dev/`.)
+
 Ridge's CCDC (WRCCDC) Blue Team toolkit, Windows first. Used under time pressure by students during
 competition, and for teaching newer club members. Read `README.md` (hard rules, folder map) first.
 
@@ -42,18 +46,19 @@ windows/harden/Harden-Walkthrough.ps1  THE hardening tool: data-driven $steps (r
 windows/harden/Set-Firewall.ps1  BASIC firewall: allow all listening ports, block other inbound, safety timer, -Revert.
 windows/hunt/Find-Attacks.ps1  Red Team response: logon attempts on every service + attack checks, each with steps.
 windows/hunt/Find-Beacons.ps1  C2 beacon scan (sampled connections, pipes, DNS cache).
+windows/harden/Repair-Defender.ps1  Defender back on: feature, service, policy switches, settings, exclusions, verify.
 windows/hunt/Repair-DNS.ps1  DNS outage: diagnose (stopped/disabled/crashed/zone/firewall), standard fixes, verify.
 windows/hunt/Kick-Block.ps1  kick user (log off + disable) / block IP (in+out), journal C:\ccdc\kick-block.csv, undo.
 windows/audit/Audit-Vulns.ps1  each check = Applies + Eval(param $S) run against live state AND a snapshot. Only read
                              registry keys that are inside Get-CcdcRegCatalog, or the BEFORE column shows '?'
 windows/alerts/              LIVE ALERTS bundle: standalone on purpose (see below)
-tools/build-alert-paste.py   regenerates windows/alerts/bt-deploy-PASTE.txt
-tools/lint/Test-PsSyntax.ps1 parse + PS 5.1 compatibility lint
-docs/live-alerts.md          design, detections, limits, test status, lessons learned for the alerts
+dev/tools/build-alert-paste.py   regenerates windows/alerts/bt-deploy-PASTE.txt
+dev/tools/lint/Test-PsSyntax.ps1 parse + PS 5.1 compatibility lint
+dev/docs/live-alerts.md          design, detections, limits, test status, lessons learned for the alerts
 docs/events/                 per-event notes from team packets (box roles, scoring, penalties). Docs only, never code
 ```
 
-## windows/alerts: how it works (read docs/live-alerts.md for detail)
+## windows/alerts: how it works (read dev/docs/live-alerts.md for detail)
 - `bt-alerts.ps1 -Install` sets 7 audit subcategories by GUID, raises the Security log to 512 MB, auto-trusts
   the installer's RDP IP, locks `C:\bt` to Administrators + SYSTEM, and registers one **event-triggered
   scheduled task per detection** (`BT-Alert-<key>`, SYSTEM). Each task runs `bt-alerts.ps1 -Key <key>`.
@@ -65,13 +70,13 @@ docs/events/                 per-event notes from team packets (box roles, scori
   `auditpol /backup`). It disables QuickEdit and owns `C:\bt\watch.pid`.
 - Detections live in the `$Triggers` table (key -> log, XPath, noisy). Handlers live in the final `switch ($Key)`.
   **To add a detection:** add a `$Triggers` entry, add a handler that calls `Send-Alert`, add an audit GUID to
-  `$AuditMap` if needed, add a self-test case, update docs/live-alerts.md, rebuild the paste.
+  `$AuditMap` if needed, add a self-test case, update dev/docs/live-alerts.md, rebuild the paste.
 - **Why standalone:** the whole bundle must deploy from one clipboard paste onto a box with nothing on it.
   Do not make it dot-source `CCDC-Common.ps1` or depend on other repo files. Keep it bare-bones and
   low-overhead (no sound, no tray icons, no background loops besides `-Watch`).
 
 ## Panel keys (v3.2)
-MONITOR D N · RED TEAM RESPONSE E X R F I · SNAPSHOT S W U · AUDIT 1-8 A · HARDEN 10-15 · BACKUP B P L · 0 first-15 · ?<key> · H help.
+MONITOR D N · RED TEAM RESPONSE E X R F I · SNAPSHOT S W U · AUDIT 1-8 A · HARDEN 10-16 (16 = Defender) · BACKUP B P L · 0 first-15 · ?<key> · H help.
 Ridge's direction: keep it small (replace, don't add), no scoring guesswork / points language in output, everything that
 can break a service must be reversible, first-15 does start-of-competition steps ONLY.
 Docs reference these keys; update README, docs/first-15-minutes-windows.md and docs/events/* when they change.
@@ -98,8 +103,8 @@ Docs reference these keys; update README, docs/first-15-minutes-windows.md and d
   when you add a new throttle prefix.
 
 ## Testing
-- No Windows here? Run `python3 tools/build-alert-paste.py` (checks paste safety) and, if `pwsh` exists,
-  `pwsh -File tools/lint/Test-PsSyntax.ps1 -Path windows`. Then say plainly that it is **untested on Windows**.
+- No Windows here? Run `python3 dev/tools/build-alert-paste.py` (checks paste safety) and, if `pwsh` exists,
+  `pwsh -File dev/tools/lint/Test-PsSyntax.ps1 -Path windows`. Then say plainly that it is **untested on Windows**.
 - Real test: on a Windows VM, panel `[D]` -> `[1]` (or the paste), keep the watch window open, run
   `C:\bt\bt-selftest.ps1`. Current baseline on a Server 2022 DC: **25 PASS / 1 FAIL (Guest enabled = real
   finding)**, Defender SKIP if disabled. Any new FAIL is a regression until proven otherwise.
@@ -107,7 +112,7 @@ Docs reference these keys; update README, docs/first-15-minutes-windows.md and d
   in trusted.txt (NETWORK LOGON + CHAIN), Kerberoast from Kali against a DC, log clearing (destroys evidence).
 
 ## Backlog (ask Ridge before starting; he prefers small, tested steps)
-1. Run the self-test on a **domain member server** and a **standalone** box; record results in docs/live-alerts.md.
+1. Run the self-test on a **domain member server** and a **standalone** box; record results in dev/docs/live-alerts.md.
 2. Live-test untrusted network logon, Kerberoast and the CHAIN/LIKELY patterns from a Kali box.
 3. CHAIN links by IP only. Consider also linking by account (who) for SYSTEM/webshell activity, without noise.
 4. `netlogon` only fires on NTLM (keeps DCs quiet). Consider a low-noise Kerberos rule (e.g. type 3 from IPs
@@ -119,4 +124,4 @@ Docs reference these keys; update README, docs/first-15-minutes-windows.md and d
 9. Snapshot restore covers registry/services/users/groups/shares/hosts/Defender/firewall/audit/secpol. Not covered:
    scheduled tasks and WMI persistence (use `R` Remove-Persistence), IIS/app config (use `K` per-service restore).
 7. Linux equivalents (auditd / journald based), same output format.
-8. Add `tools/lint` coverage for the paste rules (no `'@` lines, ASCII) so CI catches them.
+8. Add `dev/tools/lint` coverage for the paste rules (no `'@` lines, ASCII) so CI catches them.

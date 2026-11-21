@@ -12,14 +12,14 @@
      * optional report file (-OutFile)
      * dry-run + per-action confirmation for anything that changes state
      * "back up before you change it" helpers for files and registry keys
-     * reading config\ccdc.json (or the example) for IPs / scored ports
+     * reading config\ccdc.json (optional) for IPs / scored ports
 
  HOW IT IS USED
    Each script does:   . "$PSScriptRoot\..\lib\CCDC-Common.ps1"
    The leading dot means "dot-source": run this file inside MY scope so its
    functions become available to me. Nothing here runs on its own.
 
- WHAT IT READS   : config\ccdc.json or config\example.great-cretaceous.json
+ WHAT IT READS   : config\ccdc.json (only if you created it)
  WHAT IT CHANGES : creates C:\ccdc\logs and C:\ccdc\backups, appends to log files
  HOW TO UNDO     : delete C:\ccdc\ (only our own logs/backups live there)
 
@@ -277,14 +277,13 @@ function Get-CcdcConfig {
       Loads the toolkit config. Search order:
         1. -Path you pass
         2. <repo>\config\ccdc.json            (your competition copy, gitignored)
-        3. <repo>\config\example.great-cretaceous.json
       Returns $null if nothing is found (scripts must still work without it).
     #>
     param([string]$Path)
     $candidates = @()
     if ($Path) { $candidates += $Path }
     $candidates += (Join-Path $script:CcdcToolkitRoot 'config\ccdc.json')
-    $candidates += (Join-Path $script:CcdcToolkitRoot 'config\example.great-cretaceous.json')
+    # No fallback to the practice-lab example: a competition box must never load lab settings.
     foreach ($c in $candidates) {
         if ($c -and (Test-Path $c)) {
             try {

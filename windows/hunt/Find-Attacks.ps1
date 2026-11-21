@@ -288,7 +288,7 @@ $def = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows D
 if ($def) {
     Show-Attack 'Defender tampering' 'Real-time protection was turned off or an exclusion was added: attackers do this before dropping tools.' `
         @($def | ForEach-Object { "{0}  {1}" -f $_.TimeCreated.ToString('MM-dd HH:mm'), (($_.Message -split "`n" | Where-Object { $_ -match 'Exclusions|Real-time|New value' } | Select-Object -First 1) -replace '\s+', ' ') }) `
-        @('Turn real-time back on and remove unknown exclusions: panel 12 step "Defender", or W -> 1 then U.', 'Scan the excluded folder: files there are probably attacker tools (panel R).')
+        @('Turn Defender back on and remove unknown exclusions: panel 16.', 'Scan the excluded folder: files there are probably attacker tools (panel R).')
 } else { Show-Clear 'Defender tampering' }
 
 Write-Host ''
