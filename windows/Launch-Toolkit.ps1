@@ -45,6 +45,7 @@ $menu = @(
     @{ Key = 'L';  Name = 'Setup logging';           File = 'logging\Setup-Logging.ps1';     RO = $false; Desc = 'Audit policy, PS logging, Sysmon (if staged), forward to Graylog' }
     @{ Key = 'S';  Name = 'Per-service backup';      File = 'services\Invoke-AllServices.ps1'; RO = $false; Desc = 'Detect every service (DNS, IIS, SQL, SMB...), back up / info / verify each -> C:\ccdc\backups\services' }
     @{ Key = 'W';  Name = 'Watch for changes';       File = 'hunt\Watch-Changes.ps1';        RO = $true;  Desc = 'Baseline once, then diff every 15 min' }
+    @{ Key = 'D';  Name = 'LIVE ALERTS';             File = 'alerts\bt-alerts.ps1';          RO = $false; Desc = 'Instant popup on attacker activity: who/from where/how + attack chain. Install, watch, trust/block, chain, self-test' }
 )
 
 function Read-YesNo([string]$q, [bool]$default) {
@@ -131,6 +132,9 @@ function Show-Menu {
     Write-Host '  BACKUP / LOGGING / HUNT' -ForegroundColor Magenta
     foreach ($m in $menu | Where-Object { $_.Key -in 'B', 'S', 'L', 'W' }) { Write-MenuLine $m 'White' }
     Write-Host ""
+    Write-Host '  DETECT (do this in the first 5 minutes)' -ForegroundColor Red
+    foreach ($m in $menu | Where-Object { $_.Key -in 'D' }) { Write-MenuLine $m 'White' }
+    Write-Host ""
     Write-Host '  [H]  Explain a script (show its header)     [Q]  Quit' -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -140,9 +144,39 @@ function Write-MenuLine($m, $color) {
     Write-Host ("- {0}" -f $m.Desc) -ForegroundColor DarkGray
 }
 
+function Invoke-LiveAlerts {
+    # The alert bundle is standalone (paste-deployable), so it lives in C:\bt, not C:\ccdc.
+    $src = Join-Path $here 'alerts'; $bt = 'C:\bt\bt-alerts.ps1'
+    $installed = [bool](Get-ScheduledTask -TaskName 'BT-Alert-*' -EA 0)
+    Write-Host ("  Live alerts are {0} on this box." -f $(if ($installed) { 'INSTALLED' } else { 'NOT installed' })) -ForegroundColor $(if ($installed) { 'Green' } else { 'Yellow' })
+    Write-Host '  [1] Install / reinstall (copies 4 scripts to C:\bt, opens the watch window)'
+    Write-Host '  [2] Reopen watch window   [3] Trust an IP   [4] Block an IP   [5] Story of an IP (-Chain)'
+    Write-Host '  [6] Snooze popups         [7] Backfill (what already happened)   [8] Self-test   [9] Remove'
+    $a = (Read-Host '  Choice').Trim()
+    if ($a -eq '1') {
+        New-Item C:\bt -ItemType Directory -Force | Out-Null
+        foreach ($f in 'bt-alerts.ps1', 'bt-selftest.ps1', 'whoshere.ps1', 'pii-hunt.ps1') { Copy-Item (Join-Path $src $f) "C:\bt\$f" -Force }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bt -Install
+        return
+    }
+    if (-not (Test-Path $bt)) { Write-Host '  Not installed yet: choose [1] first.' -ForegroundColor Red; return }
+    switch ($a) {
+        '2' { Start-Process powershell.exe -ArgumentList "-NoExit -ExecutionPolicy Bypass -File `"$bt`" -Watch" }
+        '3' { $ip = Read-Host '  IP to trust (scorer / teammate)'; if ($ip) { & $bt -Trust $ip } }
+        '4' { $ip = Read-Host '  IP to BLOCK (in + out)'; if ($ip -and (Read-YesNo "Block $ip on this box's firewall?" $false)) { & $bt -Block $ip } }
+        '5' { $ip = Read-Host '  IP'; $h = Read-Host '  Hours back (Enter = 24)'; if ($ip) { if ($h) { & $bt -Chain $ip -Hours ([int]$h) } else { & $bt -Chain $ip } } }
+        '6' { $n = Read-Host '  Minutes (Enter = 10)'; if (-not $n) { $n = 10 }; & $bt -Snooze ([int]$n) }
+        '7' { $h = Read-Host '  Hours back (Enter = 24)'; if ($h) { & $bt -Backfill -Hours ([int]$h) } else { & $bt -Backfill } }
+        '8' { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\bt\bt-selftest.ps1' }
+        '9' { if (Read-YesNo 'Remove all BT-Alert tasks?' $false) { & $bt -Remove } }
+        default { Write-Host '  Cancelled.' -ForegroundColor DarkGray }
+    }
+}
+
 function Invoke-Entry($m) {
     $path = Join-Path $here $m.File
     if (-not (Test-Path $path)) { Write-Host "  Not found: $path" -ForegroundColor Red; return }
+    if ($m.Key -eq 'D') { Invoke-LiveAlerts; return }
     if ($m.Key -eq 'S') {
         # services\*.ps1 have their own -Action switch (no -WhatIf / -ConfigPath), so ask directly.
         $a = Read-Host '  [1] detect what is installed  [2] back up everything present  [3] full info write-up  [4] verify backups'
@@ -183,7 +217,7 @@ while ($true) {
     $choice = (Read-Host 'Select option').Trim().ToUpper()
     if ($choice -eq 'Q') { break }
     if ($choice -eq 'H') {
-        $k = (Read-Host '  Which option? (1-11, P, T, B, S, L, W)').Trim().ToUpper()
+        $k = (Read-Host '  Which option? (1-11, P, T, B, S, L, W, D)').Trim().ToUpper()
         $m = $menu | Where-Object { $_.Key -eq $k }
         if ($m) { Get-Help (Join-Path $here $m.File) -Full | Out-Host -Paging }
     } elseif ($choice -eq 'A') {

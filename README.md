@@ -21,6 +21,8 @@ Every script is meant to be read: each one opens with a header saying **what it'
      [10] Baseline hardening  [11] IIS / PHP hardening
      BACKUP / LOGGING / HUNT
      [B]  Backup   [S] Per-service backup   [L] Setup logging   [W] Watch for changes
+     DETECT (first 5 minutes)
+     [D]  LIVE ALERTS         instant popup: who / from where / how + attack chain
      [H]  Explain a script    [Q] Quit
    ```
 3. Follow [`docs/first-15-minutes-windows.md`](docs/first-15-minutes-windows.md).
@@ -43,11 +45,13 @@ windows/
   lib/CCDC-Common.ps1       shared: findings, logging, -WhatIf/confirm, backups, config
   recon/  audit/            READ-ONLY
   harden/                   changes state: -WhatIf, confirm per action, -Force, backups
+  alerts/                   LIVE ALERTS bundle (standalone, installs to C:\bt, one-paste deploy)
   backup/  logging/  hunt/
   services/                 one script per service (AD, DNS, IIS, SQL, SMB, RDP...): info, backup, restore
 config/                     example config (no secrets)
 docs/                       first-15-minutes, per-box pages, incident response, teaching guide, toolkit-review
-tools/                      Get-CcdcTools.ps1: download + hash-verify third-party tools (+ lint scripts)
+tools/                      Get-CcdcTools.ps1: download + hash-verify third-party tools (+ lint scripts,
+                            build-alert-paste.py)
 legacy/                     v1 scripts, unchanged
 ```
 
@@ -80,6 +84,12 @@ legacy/                     v1 scripts, unchanged
 | `backup\Backup-Box.ps1` | Writes backup folder only | Registry, tasks, firewall, users; DC: GPOs, DNS, LDIF (ntds.dit IFM only with `-IncludeAdIfm`); IIS config + web roots |
 | `logging\Setup-Logging.ps1` | **Changes** | Audit policy, log sizes, PowerShell logging, Sysmon (if staged), Winlogbeat/NXLog → Graylog |
 | `hunt\Watch-Changes.ps1` | Read-only (writes snapshots) | Baseline users/groups/tasks/services/ports/Run keys/WMI/shares, then diff every N minutes |
+| `alerts\bt-alerts.ps1` | **Changes** (audit policy, tasks, C:\bt ACL) | Event-triggered alerts within ~1 s: RDP/untrusted network logon, spraying, Kerberoasting, user/group/password changes, services, tasks, log clearing, Defender, tampering. Each alert: who, source IP/PC, logon type, plain-English HOW, attack CHAIN for that IP, role-correct DO NOW commands. `-Trust`, `-Block`, `-Chain <ip>`, `-Snooze`, `-Backfill`. Full doc: [`docs/live-alerts.md`](docs/live-alerts.md) |
+| `alerts\bt-selftest.ps1` | Temporary (self-cleaning) | Fires every detection for real and reports PASS/FAIL with which link broke |
+| `alerts\whoshere.ps1` | Read-only | "Who's on this box": sessions, SMB, WinRM, logons, connections, odd ports, diff vs baseline |
+| `alerts\pii-hunt.ps1` | Read-only | Card numbers (Luhn), SSNs, national IDs, passwords in files; open shares; SQL Server PII columns, sysadmins, xp_cmdshell |
+
+**Live alerts without the repo:** paste `windows\alerts\bt-deploy-PASTE.txt` into an Admin PowerShell (regenerate it with `python3 tools/build-alert-paste.py` after editing any alert script).
 
 ## Linting
 `pwsh -File tools/lint/Test-PsSyntax.ps1 -Path windows` (parse + PS 5.1 compatibility + PSScriptAnalyzer when installed).

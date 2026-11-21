@@ -1,0 +1,86 @@
+# CLAUDE.md: notes for Claude Code working in this repo
+
+Ridge's CCDC (WRCCDC) Blue Team toolkit, Windows first. Used under time pressure by students during
+competition, and for teaching newer club members. Read `README.md` (hard rules, folder map) first.
+
+## Non-negotiables
+- **Generic, never tuned to one environment.** No hard-coded IPs, hostnames, domains or account names in
+  scripts. Box-specific facts go in `config/*.json` or docs, never in code. Competition environments change
+  every event; a script that only works on the practice lab is a bug.
+- **Any Windows box:** Windows PowerShell **5.1** (repo-wide rule) and, for `windows/alerts/`, **4.0+**
+  (Server 2012 R2). No PowerShell 7 syntax (`?.`, `??`, `&&`, `||`, ternary). No external modules at runtime.
+  GUI and Server Core. Any display language: use audit-subcategory **GUIDs** and **well-known SIDs**,
+  never English group or policy names.
+- **Read-only vs change are separate** (see README hard rules 2-6). State-changing scripts support
+  `-WhatIf`, confirm per action, back up first, log with undo commands.
+- **Never write passwords to disk**, never put them on a command line, never `Start-Transcript`.
+- **Never touch scored services or scored accounts automatically.** Scored-account password changes go
+  through the competition's Password Change Request process (Quotient). Nothing auto-blocks IPs.
+- **Every script opens with the header**: `.SYNOPSIS` + `.DESCRIPTION` with PURPOSE / WHAT IT READS /
+  WHAT IT CHANGES / HOW TO UNDO / MANUAL EQUIVALENT. The panel's `[H]` shows it via `Get-Help`.
+- **Writing style for docs and output:** plain English, short sentences, no em dashes. Docs are read by
+  beginners; explain *why* each step matters and what attack it stops.
+- **Competition rule:** inject responses must be written by the team. Tools and their raw output are fine
+  as evidence; never generate inject prose.
+
+## Layout you'll touch most
+```
+windows/Launch-Toolkit.ps1   menu panel ($menu table + Get-ScriptParams + Invoke-Entry; [D] -> Invoke-LiveAlerts)
+windows/lib/CCDC-Common.ps1  shared helpers for recon/audit/harden/... (NOT used by windows/alerts)
+windows/alerts/              LIVE ALERTS bundle: standalone on purpose (see below)
+tools/build-alert-paste.py   regenerates windows/alerts/bt-deploy-PASTE.txt
+tools/lint/Test-PsSyntax.ps1 parse + PS 5.1 compatibility lint
+docs/live-alerts.md          design, detections, limits, test status, lessons learned for the alerts
+```
+
+## windows/alerts: how it works (read docs/live-alerts.md for detail)
+- `bt-alerts.ps1 -Install` sets 7 audit subcategories by GUID, raises the Security log to 512 MB, auto-trusts
+  the installer's RDP IP, locks `C:\bt` to Administrators + SYSTEM, and registers one **event-triggered
+  scheduled task per detection** (`BT-Alert-<key>`, SYSTEM). Each task runs `bt-alerts.ps1 -Key <key>`.
+- The `-Key` path reads the newest matching event, traces `SubjectLogonId` -> the 4624 logon (IP, PC, type,
+  auth package), builds the CHAIN from `C:\bt\alerts.log` (same IP, last 60 min) and writes:
+  `alerts.log` (one line, the format the chain and self-test parse), `alerts-full.log` (block), msg.exe popup.
+- `-Watch` tails `alerts-full.log` and runs the heartbeat every 30 s (tasks present/enabled/pointing at the
+  script, script SHA256 held in memory, EventLog + Schedule services, audit policy every 5 min via
+  `auditpol /backup`). It disables QuickEdit and owns `C:\bt\watch.pid`.
+- Detections live in the `$Triggers` table (key -> log, XPath, noisy). Handlers live in the final `switch ($Key)`.
+  **To add a detection:** add a `$Triggers` entry, add a handler that calls `Send-Alert`, add an audit GUID to
+  `$AuditMap` if needed, add a self-test case, update docs/live-alerts.md, rebuild the paste.
+- **Why standalone:** the whole bundle must deploy from one clipboard paste onto a box with nothing on it.
+  Do not make it dot-source `CCDC-Common.ps1` or depend on other repo files. Keep it bare-bones and
+  low-overhead (no sound, no tray icons, no background loops besides `-Watch`).
+
+## Gotchas already paid for (do not reintroduce)
+- No line in an alert script may start with `'@` (ends the paste here-string). ASCII only. The builder checks.
+- Never name a function after a built-in alias (`h`, `r`, `gc`, `ls`...). `H` broke whoshere once.
+- Inside `switch` within `ForEach-Object`, `$_` is the switch value. Use `foreach ($r in ...)`.
+- `net user <u> <pw>` prompts Y/N for passwords longer than 14 chars and hangs. Use ADSI or <=14 chars in tests.
+- With Guest enabled, a fake-username logon becomes Guest (no 4625). Spray tests use a real user + wrong password.
+- Defender cmdlets throw 0x800106ba when Defender is off: check `Get-MpComputerStatus` and SKIP.
+- Windows usually logs no 4702 when a task is **disabled**; only the heartbeat catches that.
+- `msg.exe` max 255 chars; it doesn't exist on Home editions. `query.exe` same.
+- `Set-Service` doesn't take arrays on 5.1. `Get-FileHash` is 4.0+ (fine).
+- Console QuickEdit freezes `-Watch` on click; it's disabled in-window via SetConsoleMode.
+- Throttle keys in `alert-state.json` must be cleared by the self-test (regex near the top of bt-selftest.ps1)
+  when you add a new throttle prefix.
+
+## Testing
+- No Windows here? Run `python3 tools/build-alert-paste.py` (checks paste safety) and, if `pwsh` exists,
+  `pwsh -File tools/lint/Test-PsSyntax.ps1 -Path windows`. Then say plainly that it is **untested on Windows**.
+- Real test: on a Windows VM, panel `[D]` -> `[1]` (or the paste), keep the watch window open, run
+  `C:\bt\bt-selftest.ps1`. Current baseline on a Server 2022 DC: **25 PASS / 1 FAIL (Guest enabled = real
+  finding)**, Defender SKIP if disabled. Any new FAIL is a regression until proven otherwise.
+- Manual checks the self-test can't do: RDP reconnect (RDP LOGON), network logon from a second machine not
+  in trusted.txt (NETWORK LOGON + CHAIN), Kerberoast from Kali against a DC, log clearing (destroys evidence).
+
+## Backlog (ask Ridge before starting; he prefers small, tested steps)
+1. Run the self-test on a **domain member server** and a **standalone** box; record results in docs/live-alerts.md.
+2. Live-test untrusted network logon, Kerberoast and the CHAIN/LIKELY patterns from a Kali box.
+3. CHAIN links by IP only. Consider also linking by account (who) for SYSTEM/webshell activity, without noise.
+4. `netlogon` only fires on NTLM (keeps DCs quiet). Consider a low-noise Kerberos rule (e.g. type 3 from IPs
+   never seen before) if it can stay quiet on a busy DC.
+5. Overlap: `alerts/whoshere.ps1 -SaveBaseline` and `hunt/Watch-Changes.ps1` both diff a baseline. Decide
+   whether to merge or clearly split roles (whoshere = one screen now; Watch-Changes = periodic diff).
+6. `pii-hunt.ps1` overlaps `legacy/05_PIIScanner.ps1`; the new one supersedes it.
+7. Linux equivalents (auditd / journald based), same output format.
+8. Add `tools/lint` coverage for the paste rules (no `'@` lines, ASCII) so CI catches them.
