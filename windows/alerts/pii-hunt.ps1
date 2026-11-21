@@ -51,10 +51,12 @@ Say "`n=== 1. FILES ===" Cyan
 $office = @(); $hits = 0
 foreach ($p in $Paths) {
   if (-not (Test-Path $p)) { continue }
-  Get-ChildItem $p -Recurse -File -Include $exts -Force | Where-Object { $_.Length -lt ($MaxMB * 1MB) } | ForEach-Object {
+  # Skip browser / app caches under AppData: never customer data, often locked by a running program.
+  Get-ChildItem $p -Recurse -File -Include $exts -Force | Where-Object { $_.Length -lt ($MaxMB * 1MB) -and $_.FullName -notmatch '(?i)\\AppData\\Local\\(Microsoft|Packages|Temp|Google|Mozilla)\\|\\INetCache\\|\\CacheStorage\\' } | ForEach-Object {
     $f = $_.FullName
     if ($_.Extension -in ".xlsx",".docx") { $office += $f; return }   # zipped: listed once at the end
-    $text = [IO.File]::ReadAllText($f)
+    $text = $null
+    try { $text = [IO.File]::ReadAllText($f) } catch { return }   # locked / unreadable file: skip it, keep scanning
     $cards = @([regex]::Matches($text, $rxCard) | Where-Object { Test-Luhn $_.Value }).Count
     $ssn   = ([regex]::Matches($text, $rxSSN)).Count
     $nid   = ([regex]::Matches($text, $rxNID)).Count

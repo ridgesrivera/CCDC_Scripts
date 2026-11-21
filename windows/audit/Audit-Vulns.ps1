@@ -368,7 +368,11 @@ Write-Section 'Summary'
 $okRows = @($rows | Where-Object { $_.Now -eq 'OK' })
 if ($okRows) { Write-Finding -Level GREEN -Category 'OK' -Message ("OK ({0}): {1}" -f $okRows.Count, (($okRows | ForEach-Object { $_.Check -replace '\s*\(.*$', '' }) -join ', ')) }
 $fixed = @($rows | Where-Object { $_.Change -like 'FIXED*' })
-if ($fixed) { Write-Finding -Level GREEN -Category 'Fixed' -Message ("Fixed since the snapshot ({0}): {1}" -f $fixed.Count, (($fixed | ForEach-Object { "$($_.Check -replace '\s*\(.*$', '') [$($_.Change -replace '^FIXED ?', '')]" }) -join ', ')) }
+if ($fixed) {
+    # Built with -f (no quotes nested inside a double-quoted string: Windows PowerShell 5.1 mis-parses that).
+    $fixedTxt = @($fixed | ForEach-Object { '{0} [{1}]' -f ($_.Check -replace '\s*\(.*$', ''), ($_.Change -replace '^FIXED ?', '') }) -join ', '
+    Write-Finding -Level GREEN -Category 'Fixed' -Message ('Fixed since the snapshot ({0}): {1}' -f $fixed.Count, $fixedTxt)
+}
 Write-Host ("  Open: {0} red, {1} yellow.   Most fixes: panel 12 (hardening walkthrough).   Patches: only if the rules and time allow." -f @($open | Where-Object { $_.Now -eq 'VULN' }).Count, @($open | Where-Object { $_.Now -eq 'RISK' }).Count) -ForegroundColor White
 
 # ---------------------------------------------------------------------------
