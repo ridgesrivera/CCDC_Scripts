@@ -18,7 +18,7 @@ nothing here is in the code.
 - **Traffic from the scoring engine and customers comes from outside the NAT.** In LIVE ALERTS it appears as an untrusted network logon on a steady rhythm against the same accounts. Once you are sure it is the checker, trust it: `D` → `3`.
 - **The basic firewall (`11`) keeps every listening service open to any source**, so it does not cut off the checker or customers.
 - **The DC's service accounts may be used by the Linux boxes** (Gitea, help site, tickets often bind to AD). Rotating such an account breaks that box. `2` lists service accounts (SPNs); ask before rotating them.
-- **LDAP signing** in the walkthrough (`12`) will show DANGER if the DC has seen unsigned binds: that is those Linux apps. Leave it off.
+- **LDAP signing** in the walkthrough (`12`) is always DANGER (it broke LDAP logins in our own lab) and needs a typed YES. Leave it off.
 - **Injects are written by you.** The packet says AI-written inject text scores zero. Toolkit output (reports, screenshots) is fine as evidence; the words must be yours. PDFs named like `inject04_team13.pdf`.
 
 ## Per box

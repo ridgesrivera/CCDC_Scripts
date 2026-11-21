@@ -128,8 +128,9 @@ $steps = @(
        Why = 'With it on, mimikatz reads logged-on users'' passwords in clear text. Red Team turns it on deliberately.'; RiskText = 'Nothing modern uses it.' }
     @{ Id = 'NoLMHash'; Title = 'Do not store LM password hashes'; Risk = 'SAFE'; Key = $LSA; Name = 'NoLMHash'; Value = 1; Default = 1
        Why = 'LM hashes crack in seconds.'; RiskText = 'None. Takes effect at the next password change.' }
-    @{ Id = 'NTLMv2'; Title = 'Accept only NTLMv2 (refuse LM and NTLMv1)'; Risk = 'CAUTION'; Key = $LSA; Name = 'LmCompatibilityLevel'; Value = 5; Default = 3
-       Why = 'NTLMv1 responses captured on the network (Responder) are cracked or relayed easily.'; RiskText = 'Windows XP / 2003-era clients and some very old appliances can no longer log in.' }
+    @{ Id = 'NTLMv2'; Title = 'This box uses only NTLMv2 (never LM / NTLMv1)'; Risk = 'SAFE'; Key = $LSA; Name = 'LmCompatibilityLevel'; Value = 3; Default = 3
+       Why = 'LM / NTLMv1 responses captured on the network (Responder) are cracked in minutes. 3 is the Windows default; values below 3 were set on purpose to weaken the box.'
+       RiskText = 'Level 3 only changes what THIS box sends, so nothing that logs on to it breaks. (Level 5 would also refuse NTLMv1 from others: stronger, but can lock out old clients, so it is not offered here.)' }
     @{ Id = 'AnonSAM'; Title = 'No anonymous listing of accounts'; Risk = 'SAFE'; Key = $LSA; Name = 'RestrictAnonymousSAM'; Value = 1; Default = 1
        Why = 'Stops anyone enumerating user names without logging in (first step of password spraying).'; RiskText = 'None on modern systems.' }
     @{ Id = 'AnonShares'; Title = 'No anonymous listing of shares'; Risk = 'SAFE'; Key = $LSA; Name = 'RestrictAnonymous'; Value = 1; Default = 0
@@ -139,7 +140,8 @@ $steps = @(
     @{ Id = 'LLMNR'; Title = 'Turn off LLMNR name broadcasts'; Risk = 'SAFE'; Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'; Name = 'EnableMulticast'; Value = 0; Default = 1
        Why = 'Responder answers these broadcasts and captures password hashes from anyone who mistypes a name.'; RiskText = 'Name lookups still use DNS. Nothing in a normal domain needs LLMNR.' }
     @{ Id = 'SMBSigning'; Title = 'Require SMB signing (this box as a file server)'; Risk = 'CAUTION'; Key = $SRV; Name = 'RequireSecuritySignature'; Value = 1; Default = 0
-       Why = 'Blocks NTLM relay to this box (attacker forwards a captured login to get in).'; RiskText = 'Very old clients (XP, old Samba, some printers / scanners) cannot connect to shares. DCs already require it.' }
+       Why = 'Blocks NTLM relay to this box (attacker forwards a captured login to get in).'; RiskText = 'Very old clients (XP, old Samba, some printers / scanners) cannot connect to shares.'
+       RiskDC = 'SAFE'; RiskTextDC = 'Domain controllers require SMB signing by default; every domain member already signs. This only puts the default back.' }
     @{ Id = 'LsaPPL'; Title = 'Protect LSASS (RunAsPPL)'; Risk = 'CAUTION'; Key = $LSA; Name = 'RunAsPPL'; Value = 1; Default = 0
        Why = 'Makes dumping passwords from LSASS memory (mimikatz) much harder.'; RiskText = 'Takes effect after a REBOOT. Rare third-party security / smart-card plugins can fail to load.' }
     @{ Id = 'ScriptBlockLog'; Title = 'Log every PowerShell script that runs'; Risk = 'SAFE'; Key = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging'; Name = 'EnableScriptBlockLogging'; Value = 1; Default = 0
@@ -155,15 +157,16 @@ $steps = @(
        Why = 'Users must prove who they are BEFORE the login screen appears: blocks pre-login RDP bugs and slows guessing.'; RiskText = 'Very old RDP clients, and RDP checks that cannot do NLA, fail. Test a new RDP connection after.' }
     @{ Id = 'Zerologon'; Title = 'Enforce secure Netlogon channel (Zerologon)'; Risk = 'SAFE'; DCOnly = $true; Key = 'HKLM\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters'; Name = 'FullSecureChannelProtection'; Value = 1; Default = 0
        Why = 'Zerologon takes over a domain in seconds from the network.'; RiskText = 'Only matters on an unpatched DC; modern clients are fine.' }
-    @{ Id = 'LdapSigning'; Title = 'Require LDAP signing on the DC'; Risk = 'CAUTION'; DCOnly = $true; Key = 'HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters'; Name = 'LDAPServerIntegrity'; Value = 2; Default = 1
-       Why = 'Blocks NTLM relay to LDAP (an attacker turns a captured login into AD changes, e.g. KrbRelayUp).'; RiskText = 'Apps that bind to LDAP on port 389 without signing (Linux apps, web apps, appliances) STOP authenticating.'
+    @{ Id = 'LdapSigning'; Title = 'Require LDAP signing on the DC'; Risk = 'DANGER'; DCOnly = $true; Key = 'HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters'; Name = 'LDAPServerIntegrity'; Value = 2; Default = 1
+       Why = 'Blocks NTLM relay to LDAP (an attacker turns a captured login into AD changes, e.g. KrbRelayUp).'
+       RiskText = 'In our own lab this STOPPED authentication: Linux and web apps that log in through LDAP on port 389 (Gitea, help desks, ticketing) failed immediately. Leave it OFF during a competition.'
        Evidence = {
            # Event 2887 (Directory Service log, once a day): how many unsigned binds the DC accepted.
            $e = Get-WinEvent -FilterHashtable @{ LogName = 'Directory Service'; Id = 2887 } -MaxEvents 1 -ErrorAction SilentlyContinue
            if ($e -and [int]$e.Properties[0].Value -gt 0) { return "DC logged $($e.Properties[0].Value) unsigned LDAP bind(s) (event 2887, $($e.TimeCreated.ToString('MM-dd HH:mm'))): something on the network WILL break." }
            return $null } }
-    @{ Id = 'LdapCB'; Title = 'LDAP channel binding (LDAPS)'; Risk = 'CAUTION'; DCOnly = $true; Key = 'HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters'; Name = 'LdapEnforceChannelBinding'; Value = 1; Default = 0
-       Why = 'Blocks relay to LDAPS (636).'; RiskText = 'Clients that use LDAPS without channel-binding support (old libraries) fail. 1 = only when supported, the safe level.' }
+    @{ Id = 'LdapCB'; Title = 'LDAP channel binding (LDAPS)'; Risk = 'CAUTION'; Recommend = 'skip'; DCOnly = $true; Key = 'HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters'; Name = 'LdapEnforceChannelBinding'; Value = 1; Default = 0
+       Why = 'Blocks relay to LDAPS (636).'; RiskText = 'Same family as LDAP signing: apps using LDAPS with old libraries can fail. Recommended: skip during a competition.' }
 )
 
 # Custom steps (services, AD objects, DNS, audit policy, Defender)
@@ -227,8 +230,9 @@ $steps += @(
            Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DNS\Parameters' -Name ServerLevelPluginDll -ErrorAction Stop
            Add-Undo 'DnsPlugin' 'reg' @{ Key = 'HKLM\SYSTEM\CurrentControlSet\Services\DNS\Parameters'; Name = 'ServerLevelPluginDll'; OldType = $old.Type; OldData = $old.Data; GpoKey = '' }
            Write-Host '     Restart DNS when convenient (net stop dns & net start dns) to unload it.' -ForegroundColor Yellow } }
-    @{ Id = 'DnsZones'; Title = 'DNS: no zone transfers to anyone, secure dynamic updates only'; Risk = 'CAUTION'
-       Why = 'Zone transfers hand an attacker your whole network map; insecure updates let anyone repoint names (e.g. wpad) at themselves.'; RiskText = 'A secondary DNS server that pulls the zone, or non-domain devices that register their own names, stop working.'
+    @{ Id = 'DnsZones'; Title = 'DNS: zone transfers only to the zone''s own name servers, secure dynamic updates only'; Risk = 'CAUTION'
+       Why = 'A zone transfer hands an attacker your whole network map; insecure updates let anyone repoint names (e.g. wpad) at themselves.'
+       RiskText = 'Real secondary DNS servers keep working (they are listed as name servers). Non-domain machines that register their OWN name dynamically (DHCP clients) stop updating; static records are unaffected.'
        Check = {
            if (-not (Test-CcdcModule DnsServer)) { return @{ Ok = $true; Now = 'no DNS server here' } }
            $z = @(Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object { -not $_.IsAutoCreated -and $_.ZoneType -eq 'Primary' -and $_.ZoneName -ne 'TrustAnchors' })
@@ -237,7 +241,7 @@ $steps += @(
        Apply = {
            foreach ($z in @(Get-DnsServerZone | Where-Object { -not $_.IsAutoCreated -and $_.ZoneType -eq 'Primary' -and $_.ZoneName -ne 'TrustAnchors' })) {
                $changed = $false
-               if ($z.SecureSecondaries -eq 'TransferAnyServer') { Set-DnsServerPrimaryZone -Name $z.ZoneName -SecureSecondaries NoTransfer -ErrorAction Stop; $changed = $true }
+               if ($z.SecureSecondaries -eq 'TransferAnyServer') { Set-DnsServerPrimaryZone -Name $z.ZoneName -SecureSecondaries TransferToZoneNameServer -ErrorAction Stop; $changed = $true }
                if ($z.IsDsIntegrated -and $z.DynamicUpdate -eq 'NonsecureAndSecure') { Set-DnsServerPrimaryZone -Name $z.ZoneName -DynamicUpdate Secure -ErrorAction Stop; $changed = $true }
                if ($changed) { Add-Undo 'DnsZones' 'dnszone' @{ Zone = $z.ZoneName; Secondaries = [string]$z.SecureSecondaries; Update = [string]$z.DynamicUpdate } }
            } } }
@@ -263,7 +267,8 @@ $steps += @(
            $p = Get-MpPreference; @{ Ok = (-not $p.DisableRealtimeMonitoring); Now = $(if ($p.DisableRealtimeMonitoring) { 'real-time OFF' } else { 'on' }) } }
        Apply = { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; Add-Undo 'Defender' 'mp' @{ Old = $true } } }
     @{ Id = 'AccountFlags'; Title = 'Fix risky account flags (AS-REP roastable, password not required, reversible encryption)'; Risk = 'SAFE'; DCOnly = $true
-       Why = 'Each of these hands out a crackable hash or an empty password.'; RiskText = 'Runs harden\Harden-AD.ps1, which confirms each account and writes its own rollback file.'
+       Why = 'AS-REP roastable accounts hand anyone a crackable hash with no password; "password not required" can mean an empty password.'
+       RiskText = 'Opens Harden-AD: it lists each account and asks y/N for each one. It only flips account flags (never passwords); every modern client already does pre-authentication. Undo: the rollback file it prints (C:\ccdc\logs\Harden-AD_*_rollback.ps1).'
        Check = { @{ Ok = $false; Now = 'opens Harden-AD (it lists what it finds)' } }
        Apply = { & (Join-Path $PSScriptRoot 'Harden-AD.ps1') } }
 )
@@ -343,18 +348,27 @@ switch ($Mode) {
             Write-Host ''
             Write-Host ("  STEP {0}/{1}  {2}" -f $i, $list.Count, $s.Title) -ForegroundColor White
             if ($ok) { Write-Host "    Already fine: $nowTxt" -ForegroundColor Green; continue }
-            $risk = $s.Risk
+            $risk = if ($isDC -and $s.RiskDC) { $s.RiskDC } else { $s.Risk }
+            $riskText = if ($isDC -and $s.RiskTextDC) { $s.RiskTextDC } else { $s.RiskText }
             $evidence = if ($s.Evidence) { & $s.Evidence } else { $null }
             if ($evidence) { $risk = 'DANGER' }
             $col = @{ SAFE = 'Green'; CAUTION = 'Yellow'; DANGER = 'Red' }[$risk]
             Write-Host "    Now:    $nowTxt"
             if (-not $s.Check) { Write-Host ("    Change: {0} = {1}  ({2})" -f $s.Name, $s.Value, $s.Key) }
             Write-Host "    Why:    $($s.Why)"
-            Write-Host "    Risk:   $risk - $($s.RiskText)" -ForegroundColor $col
+            Write-Host "    Risk:   $risk - $riskText" -ForegroundColor $col
             if ($evidence) { Write-Host "    !! $evidence" -ForegroundColor Red }
-            $a = if ($Force -and $risk -eq 'SAFE') { 'a' } else { Read-Host '    [A]pply  [Enter] skip  [Q]uit' }
-            if ($a -match '^(?i)q') { break }
-            if ($a -notmatch '^(?i)a') { Write-Host '    skipped' -ForegroundColor DarkGray; continue }
+            if ($risk -eq 'DANGER') {
+                # Never by accident: type YES in capitals.
+                $a = Read-Host '    Recommended: SKIP.  Type YES to apply anyway, Enter to skip, Q to stop'
+                if ($a -match '^(?i)q$') { break }
+                if ($a -cne 'YES') { Write-Host '    skipped' -ForegroundColor DarkGray; continue }
+            } else {
+                if ($s.Recommend -eq 'skip') { Write-Host '    Recommended: skip.' -ForegroundColor Yellow }
+                $a = if ($Force -and $risk -eq 'SAFE') { 'a' } else { Read-Host '    [A]pply  [Enter] skip  [Q]uit' }
+                if ($a -match '^(?i)q') { break }
+                if ($a -notmatch '^(?i)a') { Write-Host '    skipped' -ForegroundColor DarkGray; continue }
+            }
             $st = $s
             $done = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$true -Target $s.Id -Action $s.Title -Undo "Harden-Walkthrough.ps1 -Mode Undo -Step $($s.Id)" -ScriptBlock { if ($st.Apply) { & $st.Apply } else { Set-RegStep $st } }
             if ($done) { $applied++ }
