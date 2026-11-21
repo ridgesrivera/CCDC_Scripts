@@ -78,28 +78,38 @@ Write-Section 'GPOs (newest first)'
 $gpos = Search-Ldap '(objectClass=groupPolicyContainer)' @('displayName', 'whenChanged', 'whenCreated', 'name', 'gPCFileSysPath')
 foreach ($g in ($gpos | Sort-Object { [datetime](Get-Prop $_ 'whenchanged') } -Descending)) {
     $name = Get-Prop $g 'displayname'; $changed = [datetime](Get-Prop $g 'whenchanged'); $created = [datetime](Get-Prop $g 'whencreated')
-    $lvl = 'INFO'
-    if ($created -gt $cutoff) { $lvl = 'RED' } elseif ($changed -gt $cutoff) { $lvl = 'YELLOW' }
-    Write-Finding -Level $lvl -Category 'GPO' -Message ("{0,-40} changed {1:yyyy-MM-dd HH:mm}  created {2:yyyy-MM-dd}" -f $name, $changed, $created) -Detail (Get-Prop $g 'name')
+    # Default policies and the toolkit's own GPO are expected; any other GPO = read what it does (gpmc.msc).
+    $note = ''
+    if ($name -in 'Default Domain Policy', 'Default Domain Controllers Policy') { $lvl = 'INFO' }
+    elseif ($name -eq 'CCDC Hardening') { $lvl = 'INFO'; $note = '   (the toolkit''s own GPO: panel 12)' }
+    elseif ($changed -gt $cutoff) { $lvl = 'YELLOW'; $note = '   <- custom GPO changed recently: check what it does (gpmc.msc > Settings)' }
+    else { $lvl = 'INFO' }
+    Write-Finding -Level $lvl -Category 'GPO' -Message ("{0,-34} changed {1:MM-dd HH:mm}{2}" -f $name, $changed, $note)
 }
 # Where GPOs are linked (gPLink on domain root and OUs).
+$gpoName = @{}; foreach ($g in $gpos) { $gpoName[([string](Get-Prop $g 'name')).ToLower()] = Get-Prop $g 'displayname' }
 foreach ($ou in (Search-Ldap '(gPLink=*)' @('distinguishedName', 'gPLink'))) {
-    Write-Finding -Level INFO -Category 'GPOLink' -Message ("{0} links {1}" -f (Get-Prop $ou 'distinguishedname'), ((Get-Prop $ou 'gplink') -replace '(?i)\[LDAP://cn=|,cn=policies[^\]]*\]', ' ').Trim())
+    $names = @([regex]::Matches([string](Get-Prop $ou 'gplink'), '(?i)cn=(\{[0-9a-f-]+\})') | ForEach-Object { $k = $_.Groups[1].Value.ToLower(); if ($gpoName.ContainsKey($k)) { $gpoName[$k] } else { $k } })
+    Write-Finding -Level INFO -Category 'GPOLink' -Message ("Linked to {0}: {1}" -f (Get-Prop $ou 'distinguishedname'), ($names -join ', '))
 }
 
 Write-Section "SYSVOL files changed in the last $RecentDays days"
 # GPO payloads (ScheduledTasks.xml, scripts.ini, .ps1/.bat, Groups.xml) live here.
 $sysvol = "\\$dnsName\SYSVOL\$dnsName\Policies"
-$hits = Get-ChildItem $sysvol -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $cutoff } | Sort-Object LastWriteTime -Descending | Select-Object -First 40
-foreach ($f in $hits) {
-    $lvl = if ($f.Name -match '(?i)^(ScheduledTasks\.xml|scripts\.ini|psscripts\.ini|Groups\.xml|Services\.xml)$|\.(ps1|bat|cmd|vbs|exe|dll)$') { 'RED' } else { 'YELLOW' }
-    Write-Finding -Level $lvl -Category 'SYSVOL' -Message ("{0:yyyy-MM-dd HH:mm}  {1}" -f $f.LastWriteTime, $f.FullName.Replace($sysvol, '...'))
-}
-if (-not $hits) { Write-Finding -Level GREEN -Category 'SYSVOL' -Message 'No recent SYSVOL changes.' }
+# Only files that DO something are listed (tasks, scripts, groups, services, programs). Version stamps (GPT.INI,
+# GPO.cmt) and plain setting files are counted on one line. The toolkit's own GPO is skipped.
+$ccdcGuid = @($gpos | Where-Object { (Get-Prop $_ 'displayname') -eq 'CCDC Hardening' } | ForEach-Object { Get-Prop $_ 'name' })
+$recent = @(Get-ChildItem $sysvol -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $cutoff })
+$recent = @($recent | Where-Object { $p2 = $_.FullName; -not ($ccdcGuid | Where-Object { $_ -and $p2 -like "*$_*" }) })
+$active = @($recent | Where-Object { $_.Name -match '(?i)^(ScheduledTasks\.xml|scripts\.ini|psscripts\.ini|Groups\.xml|Services\.xml|Files\.xml|Registry\.xml)$|\.(ps1|bat|cmd|vbs|js|exe|dll|msi)$' } | Sort-Object LastWriteTime -Descending)
+foreach ($f in $active) { Write-Finding -Level RED -Category 'SYSVOL' -Message ("{0:MM-dd HH:mm}  {1}" -f $f.LastWriteTime, $f.FullName.Replace($sysvol, '...')) -Detail 'This runs something or changes groups on every machine the GPO applies to: open it and check.' }
+$other = $recent.Count - $active.Count
+if ($other -gt 0) { Write-Finding -Level INFO -Category 'SYSVOL' -Message "$other other recently changed policy file(s) (version stamps, settings): not listed." }
+if (-not $recent) { Write-Finding -Level GREEN -Category 'SYSVOL' -Message 'No recent SYSVOL changes.' }
 # Groups.xml with cpassword = GPP password (MS14-025) - anyone can decrypt it.
 Get-ChildItem $sysvol -Recurse -Include Groups.xml, Services.xml, ScheduledTasks.xml, DataSources.xml, Drives.xml -ErrorAction SilentlyContinue |
     Select-String -Pattern 'cpassword="[^"]+' -List | ForEach-Object {
-        Write-Finding -Level RED -Category 'GPP' -Message "GPP cpassword found (decryptable by any user): $($_.Path)"
+        Write-Finding -Level RED -Category 'GPP' -Message "Stored password in a GPO (any user can decrypt it): $($_.Path.Replace($sysvol, '...'))" -Detail 'Fix: panel 12 step GppPasswords, then rotate that account.'
     }
 
 # ---------------------------------------------------------------------------
@@ -122,7 +132,7 @@ function Test-Acl([string]$dn, [string]$label) {
         $guid = ([string]$r.ObjectType).ToLower()
         if ($replGuids.ContainsKey($guid)) {
             $ok = $who -match '(?i)\\Domain Controllers$|ENTERPRISE DOMAIN CONTROLLERS|BUILTIN\\Administrators|\\Read-only Domain Controllers|\\Enterprise Read-only Domain Controllers'
-            if (-not $ok) { $found++; Write-Finding -Level RED -Category 'DCSync' -Message "$who has $($replGuids[$guid]) on $label - can DCSync (dump all hashes)" }
+            if (-not $ok) { $found++; Write-Finding -Level RED -Category 'DCSync' -Message "$who has $($replGuids[$guid]) on $label - can DCSync (dump all hashes)" -Detail 'Fix: panel 12 step DCSyncRights (undoable).' }
             continue
         }
         # ExtendedRight with an empty ObjectType = ALL extended rights, which includes both replication rights.
@@ -133,7 +143,7 @@ function Test-Acl([string]$dn, [string]$label) {
         }
         if ($rights -match $dangerous -and $who -notmatch $expectedPrincipals) {
             $found++
-            Write-Finding -Level RED -Category 'RootACL' -Message ("{0} has {1} on {2}" -f $who, $rights, $label) -Detail ("inherit={0} objectType={1}" -f $r.InheritanceType, $guid)
+            Write-Finding -Level RED -Category 'RootACL' -Message ("{0} has {1} on {2}" -f $who, $rights, $label) -Detail $(if ($label -eq 'AdminSDHolder') { 'Fix: panel 12 step AdminSDHolderAcl (undoable).' } else { 'Remove it in ADUC > domain > Properties > Security > Advanced (check it is not a real admin tool first).' })
         }
     }
     if ($found -eq 0) { Write-Finding -Level GREEN -Category 'RootACL' -Message "No unexpected DCSync/GenericAll/WriteDacl holders on $label" }

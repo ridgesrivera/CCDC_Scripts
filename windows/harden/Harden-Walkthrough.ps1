@@ -92,6 +92,48 @@ function Test-UseGpo {
 }
 
 # ---------------------------------------------------------------------------
+# AD permission helpers (DCSync rights, AdminSDHolder). SIDs only: works in any language.
+# ---------------------------------------------------------------------------
+$script:domSid = $null
+if ($isDC -and $domainDN) { try { $script:domSid = (New-Object Security.Principal.SecurityIdentifier(([ADSI]"LDAP://$domainDN").objectSid[0], 0)).Value } catch { $null = $_ } }
+$replGuids = @('1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', '89e95b76-444d-4c62-991a-0facbeda640c')
+function Test-AdminSid([string]$sid) {
+    # SYSTEM, Enterprise DCs, Administrators, and the domain's DCs / RODCs / Domain Admins / Enterprise Admins.
+    if ($sid -in 'S-1-5-18', 'S-1-5-9', 'S-1-5-32-544') { return $true }
+    return ($script:domSid -and $sid -match ("^{0}-(498|512|516|519|521)$" -f [regex]::Escape($script:domSid)))
+}
+function Get-BadAces([string]$dn, [string]$mode) {
+    # mode 'repl': replication (DCSync) rights or all extended rights held by a non-admin.
+    # mode 'write': GenericAll / WriteDacl / WriteOwner / GenericWrite held by a non-admin.
+    $de = [ADSI]"LDAP://$dn"
+    $out = @()
+    foreach ($r in $de.ObjectSecurity.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier])) {
+        if ($r.AccessControlType -ne 'Allow' -or (Test-AdminSid $r.IdentityReference.Value)) { continue }
+        $g = ([string]$r.ObjectType).ToLower(); $rights = [string]$r.ActiveDirectoryRights
+        $bad = if ($mode -eq 'repl') { ($replGuids -contains $g) -or ($rights -match 'ExtendedRight' -and $g -eq '00000000-0000-0000-0000-000000000000') } else { $rights -match 'GenericAll|WriteDacl|WriteOwner|GenericWrite' }
+        if ($bad) { $out += $r }
+    }
+    return $out
+}
+function Get-SidName([string]$sid) { try { return (New-Object Security.Principal.SecurityIdentifier($sid)).Translate([Security.Principal.NTAccount]).Value } catch { return $sid } }
+function Remove-BadAces([string]$id, [string]$dn, [string]$mode) {
+    $de = [ADSI]"LDAP://$dn"
+    $de.Options.SecurityMasks = [DirectoryServices.SecurityMasks]::Dacl
+    $sec = $de.ObjectSecurity
+    foreach ($r in (Get-BadAces $dn $mode)) {
+        $sec.RemoveAccessRuleSpecific($r)
+        Add-Undo $id 'ace' @{ Dn = $dn; Sid = $r.IdentityReference.Value; Rights = [string]$r.ActiveDirectoryRights; ObjectType = [string]$r.ObjectType; Inheritance = [string]$r.InheritanceType; InheritedObjectType = [string]$r.InheritedObjectType }
+    }
+    $de.ObjectSecurity = $sec
+    $de.CommitChanges()
+}
+function Get-GppPasswordFiles {
+    $dns = try { ([System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()).Name } catch { $env:USERDNSDOMAIN }
+    $root = "\\$dns\SYSVOL\$dns\Policies"
+    return @(Get-ChildItem $root -Recurse -Include Groups.xml, Services.xml, ScheduledTasks.xml, DataSources.xml, Drives.xml, Printers.xml -ErrorAction SilentlyContinue | Where-Object { (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match 'cpassword="[^"]+' })
+}
+
+# ---------------------------------------------------------------------------
 # Generic registry step helpers
 # ---------------------------------------------------------------------------
 function Get-RegNow($s) {
@@ -258,14 +300,37 @@ $steps += @(
            foreach ($p in (Get-CcdcAuditPolicyPlan)) { $null = & auditpol.exe /set "/subcategory:$($p.Guid)" /success:enable /failure:enable 2>&1 }
            $k = Open-CcdcRegKey -KeyId $LSA -Writable; if ($k) { $k.SetValue('SCENoApplyLegacyAuditPolicy', 1, [Microsoft.Win32.RegistryValueKind]::DWord); $k.Close() }
            Add-Undo 'AuditPolicy' 'auditpol' @{ File = $bk } } }
-    @{ Id = 'Defender'; Title = 'Defender real-time protection on'; Risk = 'SAFE'
-       Why = 'Catches known attack tools (mimikatz, common C2) the moment they land.'; RiskText = 'If a scored app is falsely flagged, add a narrow exclusion instead of turning Defender off.'
+    @{ Id = 'Defender'; Title = 'Defender on and working (service, policy switches, real-time, exclusions)'; Risk = 'SAFE'
+       Why = 'Catches known attack tools (mimikatz, common C2) the moment they land. Attackers turn it off or exclude their folder first.'
+       RiskText = 'Opens Repair-Defender: it asks before each fix (and before removing each exclusion). Keep an exclusion only if a service you run needs it.'
        Check = {
-           if (-not (Get-Command Get-MpPreference -ErrorAction SilentlyContinue)) { return @{ Ok = $true; Now = 'Defender not present' } }
            $st = Get-MpComputerStatus -ErrorAction SilentlyContinue
-           if (-not $st -or -not $st.AntivirusEnabled) { return @{ Ok = $true; Now = 'Defender disabled/absent (not changed here)' } }
-           $p = Get-MpPreference; @{ Ok = (-not $p.DisableRealtimeMonitoring); Now = $(if ($p.DisableRealtimeMonitoring) { 'real-time OFF' } else { 'on' }) } }
-       Apply = { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; Add-Undo 'Defender' 'mp' @{ Old = $true } } }
+           $p = Get-MpPreference -ErrorAction SilentlyContinue
+           $ex = @(@($p.ExclusionPath) + @($p.ExclusionProcess) | Where-Object { $_ })
+           $ok = $st -and $st.AMServiceEnabled -and $st.AntivirusEnabled -and $st.RealTimeProtectionEnabled -and -not $ex
+           @{ Ok = [bool]$ok; Now = $(if (-not $st) { 'Defender not running / not installed' } elseif (-not $st.RealTimeProtectionEnabled) { 'real-time protection OFF' } elseif ($ex) { "exclusions: $($ex -join ', ')" } else { 'on' }) } }
+       Apply = { & (Join-Path $PSScriptRoot 'Repair-Defender.ps1') } }
+    @{ Id = 'DCSyncRights'; Title = 'Remove DCSync (replication) rights from accounts that are not DCs or admins'; Risk = 'SAFE'; DCOnly = $true
+       Why = 'An account with these rights can download EVERY password hash in the domain (DCSync), including krbtgt.'; RiskText = 'Only domain controllers need them. Exception: a real sync tool (Azure AD Connect "MSOL_" account): skip if you see one.'
+       Check = { $b = @(Get-BadAces $domainDN 'repl'); @{ Ok = ($b.Count -eq 0); Now = $(if ($b) { (($b | ForEach-Object { Get-SidName $_.IdentityReference.Value } | Sort-Object -Unique) -join ', ') + ' can DCSync' } else { 'none' }) } }
+       Apply = { Remove-BadAces 'DCSyncRights' $domainDN 'repl' } }
+    @{ Id = 'AdminSDHolderAcl'; Title = 'Remove extra control rights on AdminSDHolder'; Risk = 'SAFE'; DCOnly = $true
+       Why = 'AdminSDHolder''s permissions are copied onto every admin account every hour: control of it = control of every admin.'; RiskText = 'Only admin groups should hold these rights. Fixed admin accounts get the clean permissions at the next hourly refresh.'
+       Check = { $b = @(Get-BadAces "CN=AdminSDHolder,CN=System,$domainDN" 'write'); @{ Ok = ($b.Count -eq 0); Now = $(if ($b) { (($b | ForEach-Object { '{0} ({1})' -f (Get-SidName $_.IdentityReference.Value), $_.ActiveDirectoryRights } | Sort-Object -Unique) -join ', ') } else { 'none' }) } }
+       Apply = { Remove-BadAces 'AdminSDHolderAcl' "CN=AdminSDHolder,CN=System,$domainDN" 'write' } }
+    @{ Id = 'GppPasswords'; Title = 'Blank out passwords stored in Group Policy Preferences (cpassword)'; Risk = 'SAFE'; DCOnly = $true
+       Why = 'Any domain user can read SYSVOL and decrypt these passwords instantly (the key is public).'; RiskText = 'The policy keeps doing everything else (group membership etc.); it just stops setting that password. Each file is backed up first. Rotate the accounts listed: their passwords are already exposed.'
+       Check = { $f = @(Get-GppPasswordFiles); @{ Ok = ($f.Count -eq 0); Now = $(if ($f) { "$($f.Count) file(s): " + (($f | ForEach-Object { $_.Directory.Parent.Parent.Parent.Name + '\' + $_.Name }) -join ', ') } else { 'none' }) } }
+       Apply = {
+           $bdir = Join-Path 'C:\ccdc\backups' ("gpp_{0}" -f (Get-Date -Format 'yyyyMMdd_HHmmss')); New-Item -ItemType Directory -Path $bdir -Force | Out-Null
+           $i = 0
+           foreach ($f in (Get-GppPasswordFiles)) {
+               $i++; $bk = Join-Path $bdir ("{0}_{1}" -f $i, $f.Name); Copy-Item $f.FullName $bk -Force
+               $txt = Get-Content $f.FullName -Raw
+               foreach ($m in [regex]::Matches($txt, '(?i)(userName|accountName|runAs)="([^"]+)"[^>]*cpassword="[^"]+')) { Write-Host "     password exposed for: $($m.Groups[2].Value)  -> rotate it (panel 10)" -ForegroundColor Yellow }
+               [IO.File]::WriteAllText($f.FullName, ($txt -replace 'cpassword="[^"]*"', 'cpassword=""'))
+               Add-Undo 'GppPasswords' 'file' @{ Path = $f.FullName; Backup = $bk }
+           } } }
     @{ Id = 'AccountFlags'; Title = 'Fix risky account flags (AS-REP roastable, password not required, reversible encryption)'; Risk = 'SAFE'; DCOnly = $true
        Why = 'AS-REP roastable accounts hand anyone a crackable hash with no password; "password not required" can mean an empty password.'
        RiskText = 'Opens Harden-AD: it lists each account and asks y/N for each one. It only flips account flags (never passwords); every modern client already does pre-authentication. Undo: the rollback file it prints (C:\ccdc\logs\Harden-AD_*_rollback.ps1).'
@@ -302,6 +367,13 @@ function Undo-Entry($e) {
         'dnszone' { Set-DnsServerPrimaryZone -Name $d.Zone -SecureSecondaries $d.Secondaries -ErrorAction Stop; Set-DnsServerPrimaryZone -Name $d.Zone -DynamicUpdate $d.Update -ErrorAction Stop }
         'auditpol' { $o = & auditpol.exe /restore "/file:$($d.File)" 2>&1; if ($LASTEXITCODE -ne 0) { throw ($o -join ' ') } }
         'mp' { Set-MpPreference -DisableRealtimeMonitoring ([bool]$d.Old) -ErrorAction Stop }
+        'ace' {
+            $de = [ADSI]"LDAP://$($d.Dn)"; $de.Options.SecurityMasks = [DirectoryServices.SecurityMasks]::Dacl
+            $sec = $de.ObjectSecurity
+            $rule = New-Object DirectoryServices.ActiveDirectoryAccessRule((New-Object Security.Principal.SecurityIdentifier($d.Sid)), [DirectoryServices.ActiveDirectoryRights]$d.Rights, [Security.AccessControl.AccessControlType]::Allow, [guid]$d.ObjectType, [DirectoryServices.ActiveDirectorySecurityInheritance]$d.Inheritance, [guid]$d.InheritedObjectType)
+            $sec.AddAccessRule($rule); $de.ObjectSecurity = $sec; $de.CommitChanges()
+        }
+        'file' { Copy-Item $d.Backup $d.Path -Force -ErrorAction Stop }
         default { throw "unknown undo kind $($e.Kind)" }
     }
 }

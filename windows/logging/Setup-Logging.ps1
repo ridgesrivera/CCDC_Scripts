@@ -12,7 +12,7 @@
         3. Enables PowerShell script block (4104) + module logging, and command
            lines in process creation events (4688)
         4. Installs or updates Sysmon IF the binary is present locally
-           (default tools\sysmon\Sysmon64.exe - see tools\README.md; nothing is downloaded)
+           (default tools\sysmon\Sysmon64.exe or dev\tools\sysmon\ - see dev\tools\README.md in the repo; nothing is downloaded)
         5. Optionally configures Winlogbeat or NXLog (if installed/present) to
            ship events to Graylog (tarpit) at -GraylogIp
 
@@ -51,7 +51,9 @@ param(
 . "$PSScriptRoot\..\lib\CCDC-Common.ps1"
 Initialize-Ccdc -ScriptName 'Setup-Logging'
 $config = Get-CcdcConfig -Path $ConfigPath
-$tools  = Join-Path $script:CcdcToolkitRoot 'tools'
+# Staged tools: <toolkit>\tools (copied over by hand) or dev\tools (where Get-CcdcTools stages them).
+$tools  = @((Join-Path $script:CcdcToolkitRoot 'tools'), (Join-Path $script:CcdcToolkitRoot 'dev\tools') | Where-Object { Test-Path (Join-Path $_ 'sysmon') }) | Select-Object -First 1
+if (-not $tools) { $tools = Join-Path $script:CcdcToolkitRoot 'tools' }
 if (-not $SysmonPath)   { $SysmonPath   = Join-Path $tools 'sysmon\Sysmon64.exe' }
 if (-not $SysmonConfig) { $SysmonConfig = Join-Path $tools 'sysmon\sysmonconfig.xml' }
 if (-not $GraylogIp -and $config -and $config.graylog) {
@@ -123,7 +125,7 @@ Write-Section '4. Sysmon'
 $sysmonSvc = Get-Service -Name Sysmon64, Sysmon -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not (Test-Path $SysmonPath)) {
     $state = if ($sysmonSvc) { "already installed ($($sysmonSvc.Name), $($sysmonSvc.Status))" } else { 'not installed' }
-    Write-Finding -Level YELLOW -Category 'Sysmon' -Message "Sysmon binary not found at $SysmonPath - $state" -Detail 'Copy Sysmon64.exe + a config into tools\sysmon\ (see tools\README.md for URL + checksum steps).'
+    Write-Finding -Level YELLOW -Category 'Sysmon' -Message "Sysmon binary not found at $SysmonPath - $state" -Detail 'Copy Sysmon64.exe + a config into tools\sysmon\ (see dev\tools\README.md for URL + checksum steps).'
 } elseif (-not (Test-Path $SysmonConfig)) {
     Write-Finding -Level YELLOW -Category 'Sysmon' -Message "Sysmon config not found at $SysmonConfig - refusing to install with no config (default config is too noisy/blind)."
 } elseif ($sysmonSvc) {
@@ -151,7 +153,7 @@ $nxDir  = @("${env:ProgramFiles(x86)}\nxlog", "$env:ProgramFiles\nxlog") | Where
 if ($Forwarder -eq 'Auto') { $Forwarder = if ($wlbDir) { 'Winlogbeat' } elseif ($nxDir) { 'NXLog' } else { 'None' } }
 
 if ($Forwarder -eq 'None') {
-    Write-Finding -Level INFO -Category 'Forward' -Message 'No Winlogbeat/NXLog found - events stay local. (See tools\README.md to stage one.)'
+    Write-Finding -Level INFO -Category 'Forward' -Message 'No Winlogbeat/NXLog found - events stay local. (See dev\tools\README.md to stage one.)'
 } elseif (-not $GraylogIp) {
     Write-Finding -Level YELLOW -Category 'Forward' -Message 'No -GraylogIp and none in config - skipping forwarding.'
 } elseif ($Forwarder -eq 'Winlogbeat') {

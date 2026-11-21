@@ -9,10 +9,10 @@ backups/
 scan-*/
 *.log
 
-# Third-party binaries go in tools/ locally but are NOT committed (see tools/README.md)
-tools/bin/
-tools/linux/
-tools/sysmon/*
-tools/staged-tools.csv
-tools/winlogbeat/
-tools/nxlog/
+# Third-party binaries go in dev/tools/ locally but are NOT committed (see dev/tools/README.md)
+dev/tools/bin/
+dev/tools/linux/
+dev/tools/sysmon/*
+dev/tools/staged-tools.csv
+dev/tools/winlogbeat/
+dev/tools/nxlog/

@@ -49,7 +49,7 @@
       Get-WinEvent -FilterHashtable @{LogName='Security';Id=4720} -MaxEvents 5 | fl
 
     FILES (C:\bt)  alerts.log  alerts-full.log  alert-state.json  trusted.txt  watch.pid
-    See docs/live-alerts.md for the full design, limits and test results.
+    See dev/docs/live-alerts.md in the repo for the full design, limits and test results.
 
 .EXAMPLE
     .\bt-alerts.ps1 -Install

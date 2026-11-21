@@ -1,0 +1,8 @@
+# What GitHub's zip download (and install.ps1) contains: only the live toolkit.
+# Everything below stays in the repo but is not downloaded to competition boxes.
+dev/ export-ignore
+.claude/ export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore
+install.ps1 export-ignore
+windows/alerts/bt-deploy-PASTE.txt export-ignore

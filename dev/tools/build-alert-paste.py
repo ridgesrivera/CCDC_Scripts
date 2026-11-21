@@ -15,7 +15,7 @@ Output uses CRLF line endings.
 import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parents[2]   # dev/tools/ -> repo root
 SRC = ROOT / "windows" / "alerts"
 OUT = SRC / "bt-deploy-PASTE.txt"
 FILES = ["bt-alerts.ps1", "whoshere.ps1", "pii-hunt.ps1", "bt-selftest.ps1"]

@@ -38,6 +38,7 @@ It does these, in order, asking before each one:
 | Next | Find PII / card data / passwords in files | `7` |
 | Any time something looks wrong | **Find attacks**: names the attack and lists what to do | `E` |
 | DNS stopped answering | **Fix DNS**: standard fixes, then tells you what is left | `F` |
+| Defender off / an exclusion was added | **Defender on**: brings it back and verifies | `16` |
 | Alert about an IP or user | Kick the user, block the IP | `X` |
 | Something broke after a change | See what changed, put it back | `W` → `1`, then `U` |
 | Hourly | C2 beacon scan, who is on the box | `8`, `N` |

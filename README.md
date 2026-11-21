@@ -52,6 +52,7 @@ what it changes, how to undo it, and the manual commands it automates, so newer 
    [10] Rotate passwords              [11] Firewall (basic)
    [12] Hardening walkthrough         [13] IIS / PHP hardening
    [14] SQL Server hardening          [15] Reset krbtgt (DC)
+   [16] Defender on
 
   BACKUP & LOGGING
    [B]  Backup AD / IIS               [P]  Per-service backup
@@ -89,7 +90,7 @@ Every Windows attack, how to spot it, how to stop it without breaking things: [`
 ### Monitor
 | Key | Script | What it does |
 |---|---|---|
-| D | `alerts\bt-alerts.ps1` | **LIVE ALERTS.** Fires within ~1 s on RDP / untrusted network logons, password spraying, Kerberoasting, user / group / password changes, new services and tasks, log clearing, Defender changes, tampering with the alerts. Each alert: who, from which IP, how, what that IP did before, what to do. [`docs/live-alerts.md`](docs/live-alerts.md) |
+| D | `alerts\bt-alerts.ps1` | **LIVE ALERTS.** Fires within ~1 s on RDP / untrusted network logons, password spraying, Kerberoasting, user / group / password changes, new services and tasks, log clearing, Defender changes, tampering with the alerts. Each alert: who, from which IP, how, what that IP did before, what to do. [`dev/docs/live-alerts.md`](dev/docs/live-alerts.md) |
 | N | `alerts\whoshere.ps1` | **Every way in:** RDP, SSH, SMB / admin shares, WinRM, WMI, VNC, Telnet, FTP, web, SQL. Each one explained, whether it is ON, and who is connected right now from where. Plus PsExec-style services, web shells, logons, failed logons, odd ports, outbound connections |
 
 ### Red Team response
@@ -127,6 +128,7 @@ Every Windows attack, how to spot it, how to stop it without breaking things: [`
 | 12 | `harden\Harden-Walkthrough.ps1` | **Hardening walkthrough:** each change shown with what it stops and its risk (SAFE / CAUTION / DANGER, with evidence from this box). Apply or skip. On a DC registry settings go into one GPO "CCDC Hardening". Undo one step or all |
 | 13 | `harden\Harden-IIS-PHP.ps1` | Back up IIS / web roots, WP `DISALLOW_FILE_EDIT`, config ACLs, WP admins / plugins |
 | 14 | `harden\Harden-MSSQL.ps1` | sa, sysadmins, weak SQL logins; turn off xp_cmdshell and friends |
+| 16 | `harden\Repair-Defender.ps1` | Defender back on: reinstall if removed, start the service, remove policy switches that disable it, real-time on, review each exclusion, verify, optional quick scan |
 | 15 | `harden\Reset-Krbtgt.ps1` | DC, after a domain compromise: one krbtgt reset per run, enforced wait before the second |
 | (12) | `harden\Harden-AD.ps1` | Account flags (AS-REP, password not required, reversible encryption); run by the walkthrough |
 
@@ -153,7 +155,7 @@ Every Windows attack, how to spot it, how to stop it without breaking things: [`
 
 ## Before the event
 - Practise on a VM: open the panel, press `0`, run the alerts self-test (`D` → `8`), apply one step in `12`, then try `W` → `1` and `U`, and `12` → `3`.
-- Optional third-party tools (Sysmon for `L`, PingCastle, Sysinternals): stage with `tools\Get-CcdcTools.ps1`. See [`tools/README.md`](tools/README.md).
+- Optional third-party tools (Sysmon for `L`, PingCastle, Sysinternals): stage with `dev\tools\Get-CcdcTools.ps1`. See [`dev/tools/README.md`](dev/tools/README.md).
 
 ## Folder map
 ```
@@ -166,10 +168,13 @@ windows/
   hunt/                     Find-Attacks, Find-Beacons, Kick-Block, Remove-Persistence, Watch-Changes, New-IncidentReport
   harden/                   Set-Firewall, Harden-Walkthrough, Harden-AD, Rotate-Passwords, Harden-IIS-PHP, Harden-MSSQL, Reset-Krbtgt
   backup/ logging/ services/
-config/  docs/  tools/
+docs/                       competition docs (first 15, incident response, event notes, attacks PDF)
+config/                     optional ccdc.json (gitignored)
+dev/                        NOT downloaded: dev tools, lint, paste builder, lab notes, teaching guide
 ```
 
 ## Maintaining
-- Lint: `pwsh -File tools/lint/Test-PsSyntax.ps1 -Path windows`.
-- After editing anything in `windows/alerts/`, rebuild the paste: `python3 tools/build-alert-paste.py`.
-- Notes for AI assistants and contributors: [`CLAUDE.md`](CLAUDE.md).
+- Only the live toolkit is downloaded (GitHub zip / install.ps1): `dev/`, `.claude/`, `install.ps1` and the alerts paste are `export-ignore`.
+- Lint: `pwsh -File dev/tools/lint/Test-PsSyntax.ps1 -Path windows`.
+- After editing anything in `windows/alerts/`, rebuild the paste: `python3 dev/tools/build-alert-paste.py`.
+- Contributor notes: [`.claude/CLAUDE.md`](.claude/CLAUDE.md).

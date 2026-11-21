@@ -75,6 +75,7 @@ $menu = @(
     @{ Key = '12'; Sec = 'HAR'; Name = 'Hardening walkthrough'; File = 'harden\Harden-Walkthrough.ps1';   RO = $false; Desc = 'Step by step: each change explained (what it stops, SAFE/CAUTION/DANGER). On a DC it goes into one GPO. Undo any step.' }
     @{ Key = '13'; Sec = 'HAR'; Name = 'IIS / PHP hardening';   File = 'harden\Harden-IIS-PHP.ps1';       RO = $false; Desc = 'Back up web roots, WP DISALLOW_FILE_EDIT, config perms, WP admins/plugins.' }
     @{ Key = '14'; Sec = 'HAR'; Name = 'SQL Server hardening';  File = 'harden\Harden-MSSQL.ps1';         RO = $false; Desc = 'Audit sa / sysadmins / weak logins, turn off xp_cmdshell and friends.' }
+    @{ Key = '16'; Sec = 'HAR'; Name = 'Defender on';           File = 'harden\Repair-Defender.ps1';      RO = $false; Desc = 'Bring Defender back: reinstall if removed, start the service, remove policy switches that turn it off, real-time on, review exclusions, verify.' }
     @{ Key = '15'; Sec = 'HAR'; Name = 'Reset krbtgt (DC)';     File = 'harden\Reset-Krbtgt.ps1';         RO = $false; Desc = 'DC, after a domain compromise (DCSync, ntds.dit stolen): kills golden tickets. Run twice, with a pause.' }
     # BACKUP / LOGGING
     @{ Key = 'B';  Sec = 'BAK'; Name = 'Backup AD / IIS';       File = 'backup\Backup-Box.ps1';           RO = $false; Desc = 'On a DC: GPOs, DNS zones, AD objects. On a web server: IIS config + web roots. -> C:\ccdc\backups. Other services: P.' }
@@ -354,7 +355,7 @@ function Invoke-Entry($m) {
     }
     if ($m.Key -in 'S', 'W', 'U') { Invoke-Snapshot $m.Key; return }
     if ($m.Key -eq 'X') { Invoke-KickMenu $path; return }
-    if ($m.Key -eq 'F') { & $path; return }   # outage: no dry run, every fix asks y/N itself
+    if ($m.Key -in 'F', '16') { & $path; return }   # every fix asks y/N itself: no separate dry run
     if ($m.Key -eq '11') { Invoke-FirewallMenu $path; return }
     if ($m.Key -eq '12') { Invoke-WalkthroughMenu $path; return }
     $params = Get-ScriptParams $m.Key

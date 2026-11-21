@@ -303,7 +303,7 @@ $checks = @(
            if ((Get-SReg $S $P_RDP 'UserAuthentication') -eq 0) { return (New-Risk 'RDP on without NLA: login screen exposed to anyone, BlueKeep-class bugs pre-auth') }
            New-Ok 'NLA required' } }
     @{ Id = 'Defender'; Cve = 'av'; Name = 'Defender real-time + exclusions'; Applies = { [bool](Get-Command Get-MpPreference -ErrorAction SilentlyContinue) }; Tokens = @('Defender', 'DisableRealtimeMonitoring', 'Exclusion')
-       Fix = 'Set-MpPreference -DisableRealtimeMonitoring $false ; Remove-MpPreference -ExclusionPath <path>'
+       Fix = 'Panel 16 (Defender on): service, policy switches, real-time, exclusions, verify'
        Eval = { param($S)
            if (-not $S.Defender -or $S.Defender.Count -eq 0) { $script:Unknown = $true; return (New-Risk 'Defender settings not readable') }
            if ($S.Defender.DisableRealtimeMonitoring) { return (New-Vuln 'real-time protection OFF') }

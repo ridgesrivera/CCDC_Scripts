@@ -10,9 +10,9 @@ what that IP did before (attack chain), and the commands to undo it. Standalone 
 | `bt-selftest.ps1` | Fires every detection for real, PASS/FAIL, self-cleaning |
 | `whoshere.ps1` | One-screen "who's on this box" + diff vs baseline (read-only) |
 | `pii-hunt.ps1` | PII in files, shares and SQL Server (read-only) |
-| `bt-deploy-PASTE.txt` | All four scripts + install in one paste. **Generated**: `python3 tools/build-alert-paste.py` |
+| `bt-deploy-PASTE.txt` | All four scripts + install in one paste. **Generated**: `python3 dev/tools/build-alert-paste.py` |
 
 Deploy: panel `[D]` -> `[1]`, or paste `bt-deploy-PASTE.txt` into an Admin PowerShell.
 Then keep the **BT ALERTS** window open and `-Trust` the scorer IP when it appears.
 
-Full design, every detection, limits and test status: [`docs/live-alerts.md`](../../docs/live-alerts.md).
+Full design, every detection, limits and test status: [`dev/docs/live-alerts.md`](../../dev/docs/live-alerts.md) (in the repo).
