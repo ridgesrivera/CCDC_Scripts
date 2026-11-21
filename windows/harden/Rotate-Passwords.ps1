@@ -240,6 +240,16 @@ if ($Prompt -and -not $WhatIfPreference) {
 # Rotate
 # ---------------------------------------------------------------------------
 $results = New-Object System.Collections.ArrayList   # in memory ONLY
+function Test-NewPassword($acct, [string]$pw) {
+    # Proves the change took effect: log on with the NEW password (one check, no lockout risk).
+    # $true = works, $false = rejected (disabled / locked / not applied), $null = could not test.
+    try {
+        Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction Stop
+        $ctxType = if ($acct.Id -like 'WinNT://*') { 'Machine' } else { 'Domain' }
+        $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext($ctxType)
+        try { return $ctx.ValidateCredentials($acct.Name, $pw) } finally { $ctx.Dispose() }
+    } catch { return $null }
+}
 foreach ($acct in $final) {
     $newPw = if ($shared) { $shared } else { New-CcdcPassword $Length }
     $acctId = $acct.Id
@@ -270,7 +280,9 @@ foreach ($acct in $final) {
     if ($state.PasswordSet) {
         if (-not $ok) { Write-Finding -Level YELLOW -Category 'Rotate' -Message "$($acct.Name): password WAS changed, but a follow-up step failed - it is still shown below." }
         if ($state.Warning) { Write-Finding -Level YELLOW -Category 'Rotate' -Message "$($acct.Name): $($state.Warning)" }
-        [void]$results.Add([pscustomobject]@{ Account = "$Scope\$($acct.Name)"; Password = $newPw })
+        $v = Test-NewPassword $acct $newPw
+        $vTxt = if ($v -eq $true) { 'verified: new password works' } elseif ($v -eq $false) { 'NOT VERIFIED: logon with it failed (account disabled / locked?)' } else { 'could not test' }
+        [void]$results.Add([pscustomobject]@{ Account = "$Scope\$($acct.Name)"; Password = $newPw; Check = $vTxt })
     }
 }
 $newPw = $null; $shared = $null
@@ -284,7 +296,7 @@ if ($results.Count -gt 0) {
     Write-Host '  NEW PASSWORDS - shown ONCE. Write them down / hand to the captain NOW.' -ForegroundColor Yellow
     Write-Host '  They are NOT saved anywhere. Screen clears when you press Enter.' -ForegroundColor Yellow
     Write-Host ('#' * 72) -ForegroundColor Yellow
-    foreach ($r in $results) { Write-Host ("  {0,-35} {1}" -f $r.Account, $r.Password) -ForegroundColor White }
+    foreach ($r in $results) { Write-Host ("  {0,-30} {1}   " -f $r.Account, $r.Password) -ForegroundColor White -NoNewline; Write-Host $r.Check -ForegroundColor $(if ($r.Check -like 'verified*') { 'Green' } else { 'Yellow' }) }
     Write-Host ('#' * 72) -ForegroundColor Yellow
     [void](Read-Host '  Press Enter when recorded')
     Clear-Host
@@ -292,6 +304,7 @@ if ($results.Count -gt 0) {
     # so this removes references; the GC reclaims them.)
     $results.Clear(); [GC]::Collect()
     Write-Finding -Level GREEN -Category 'Rotate' -Message 'Passwords rotated. Update the team password sheet (paper). Log lists account names only.'
+    Write-Finding -Level INFO -Category 'Rotate' -Message 'The OLD password stops working for new logons right away. Sessions already open stay open: kick them now (panel X -> 1, without disabling).'
 } elseif ($WhatIfPreference) {
     Write-Finding -Level INFO -Category 'Rotate' -Message 'Dry run complete - no passwords changed.'
 }

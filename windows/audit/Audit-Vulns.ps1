@@ -239,7 +239,7 @@ $checks = @(
            if ((Get-SReg $S $P_SRV 'RequireSecuritySignature') -eq 1) { return (New-Risk 'unpatched, but SMB signing is required (blocks the reflection)') }
            New-Vuln 'unpatched since June 2025 and SMB signing not required: any domain user -> SYSTEM via coerced NTLM' } }
     @{ Id = 'LDAPSign'; Cve = 'relay'; Name = 'LDAP signing + channel binding (DC)'; Applies = { $X.IsDC }; Tokens = @('LDAPServerIntegrity', 'LdapEnforceChannelBinding')
-       Fix = 'GPO: Domain controller: LDAP server signing requirements = Require signing; LdapEnforceChannelBinding=2. CAUTION: test scored LDAP binds'
+       Fix = 'Leave OFF during a competition: requiring it breaks apps that log in through LDAP (seen in our lab). Reduce relay instead: panel 12 steps SMBSigning, LLMNR, NBTNS, SpoolerDC'
        Eval = { param($S)
            $i = Get-SReg $S $P_NTDS 'LDAPServerIntegrity'; $cb = Get-SReg $S $P_NTDS 'LdapEnforceChannelBinding'
            if ($i -ne 2 -and $cb -ne 2) { return (New-Risk ("LDAP signing not required (LDAPServerIntegrity={0}) and no channel binding: NTLM relay to LDAP (KrbRelayUp, ntlmrelayx)" -f $(if ($null -eq $i) { 'unset' } else { $i }))) }
@@ -252,7 +252,7 @@ $checks = @(
            if ($X.IsDC) { return (New-Vuln 'DC does not require SMB signing (default is required: someone turned it off)') }
            New-Risk 'SMB signing not required: NTLM relay to this box' } }
     @{ Id = 'NTLMv1'; Cve = 'creds'; Name = 'NTLMv1 / LM hashes'; Applies = { $true }; Tokens = @('LmCompatibilityLevel', 'NoLMHash')
-       Fix = 'Set Lsa LmCompatibilityLevel=5 (3 minimum) and NoLMHash=1'
+       Fix = 'Panel 12 step NTLMv2 (puts back the Windows default 3) and step NoLMHash'
        Eval = { param($S)
            $l = Get-SReg $S $P_LSA 'LmCompatibilityLevel'; $n = Get-SReg $S $P_LSA 'NoLMHash'
            if ($null -ne $l -and [int]$l -lt 3) { return (New-Vuln "LmCompatibilityLevel=${l}: LM/NTLMv1 accepted (hashes cracked in minutes)") }
