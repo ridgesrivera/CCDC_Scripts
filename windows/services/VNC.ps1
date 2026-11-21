@@ -27,7 +27,7 @@ $Def = @{
 Third-party remote desktop (screen sharing). Usually a single shared
 password (max 8 chars, stored weakly-encrypted with a FIXED DES key - anyone
 who reads the registry/ini can decrypt it). No per-user accounts unless
-RealVNC Enterprise / Windows auth is configured. Often scored on 5900.
+RealVNC Enterprise / Windows auth is configured. Default port 5900.
 "@
     Ports        = @(
         @{ Port = 5900; Proto = 'TCP'; Use = 'VNC (display :0)' }

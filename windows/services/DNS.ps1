@@ -27,10 +27,10 @@ $Def = @{
 Resolves names to IPs for the whole network. On a domain controller DNS is
 REQUIRED for Active Directory: clients find DCs through SRV records
 (_ldap._tcp.dc._msdcs.<domain>), so if DNS dies, logons, GPO, Kerberos and
-almost every scored service that uses a hostname die with it.
+almost every service that uses a hostname die with it.
 Zones are either file-backed (%windir%\System32\dns\*.dns) or AD-integrated
 (stored in the DomainDnsZones / ForestDnsZones partitions of AD).
-The scoring engine almost always checks DNS by resolving a record you own.
+Clients (and monitoring) check DNS by resolving records you own: keep them correct.
 "@
     Ports        = @(
         @{ Port = 53; Proto = 'TCP/UDP'; Use = 'DNS queries / zone transfers (TCP)' }

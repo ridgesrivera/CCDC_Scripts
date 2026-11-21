@@ -18,8 +18,7 @@
 
     !! SENSITIVE OUTPUT !!
       The IFM copy contains ntds.dit = every domain password HASH. If Red Team
-      grabs it, that is "recovery of user IDs and passwords from a team system"
-      (a big penalty in most packets), so IFM is OFF unless you pass
+      grabs it, every account in the domain is compromised, so IFM is OFF unless you pass
       -IncludeAdIfm. Web roots contain wp-config.php = DB passwords. The script
       locks the backup folder to Administrators + SYSTEM only. Do not copy it
       to a share. (-SkipAdIfm is still accepted for old notes; it is now the default.)

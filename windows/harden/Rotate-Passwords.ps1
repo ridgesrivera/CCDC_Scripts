@@ -21,7 +21,7 @@
     !! SCORED ACCOUNTS !!
       Accounts the scoring engine logs in with need an approved Password
       Change Request (PCR) submitted to the White/Black team BEFORE you change
-      them, or you lose SLA points. Put them in config scoredAccounts or -Exclude.
+      them, or the service that uses them breaks. Put them in config scoredAccounts or -Exclude.
       Service/bind accounts (e.g. Keycloak's LDAP bind user on the DC, the
       MySQL user in wp-config.php) break their app when changed - change the
       app config at the same time or leave them alone.

@@ -4,11 +4,10 @@
 
 .DESCRIPTION
     PURPOSE
-      SLA penalties cost this team more than Red Team did at both scored
-      events. A service that fails 5 checks in a row is an SLA violation, and
-      with one-minute checks that is five minutes. This script walks the same
-      ladder the scoring engine depends on, for every scored port on THIS box,
-      and names the rung that is broken:
+      A service that is down hurts the business more than almost anything
+      else, and it is often down for a reason you can see from the box itself.
+      For every service port on THIS box, this script walks the chain a client
+      depends on and names the link that is broken:
 
         1. Is anything listening on the port?  On the right address (not only 127.0.0.1)?
         2. Is the Windows service behind it running, and will it start after a reboot?
@@ -111,7 +110,7 @@ if ($Tcp.Count -eq 0 -and $hostCfg) { $Tcp = @($hostCfg.scoredPorts.tcp | Where-
 if ($Udp.Count -eq 0 -and $hostCfg) { $Udp = @($hostCfg.scoredPorts.udp | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
 if ($Tcp.Count -eq 0) {
     $Tcp = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $wellKnown -contains [int]$_.LocalPort } | ForEach-Object { [int]$_.LocalPort } | Sort-Object -Unique)
-    Write-Finding -Level YELLOW -Category 'Setup' -Message ("This host is not in the config and no -Tcp given: GUESSING from what is listening now: {0}" -f ($Tcp -join ', ')) -Detail 'A service that is already down will be missed. Put the real scored ports in config\ccdc.json or pass -Tcp.'
+    Write-Finding -Level INFO -Category 'Setup' -Message ("No ports given: checking the well-known services listening now: {0}" -f ($Tcp -join ', ')) -Detail 'A service that is already stopped is not in this list. To watch specific ports, pass -Tcp (panel: type them at the prompt).'
 }
 $scoredAccounts = @(); if ($hostCfg) { $scoredAccounts = @($hostCfg.scoredAccounts | Where-Object { $_ }) }
 $httpPorts = @(80, 443, 8000, 8008, 8080, 8443, 8888)

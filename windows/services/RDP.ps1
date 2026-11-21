@@ -20,8 +20,8 @@ $Def = @{
     Title        = 'Remote Desktop Services (RDP)'
     ServiceNames = @('TermService', 'UmRdpService', 'SessionEnv')
     Description  = @"
-Graphical remote login. Almost always scored (orange team / scoring engine
-logs in as a user) AND almost always how red team walks in with stolen creds.
+Graphical remote login. Users and admins depend on it, AND it is a common
+way in for an attacker with stolen credentials.
 Who may log in = local 'Administrators' + 'Remote Desktop Users' group +
 the 'Allow log on through Remote Desktop Services' user right.
 Key settings: fDenyTSConnections (0 = RDP on), PortNumber (default 3389),

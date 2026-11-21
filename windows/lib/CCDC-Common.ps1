@@ -495,8 +495,8 @@ function Add-CcdcEvidence {
     <#
       Records one removed/contained item as a JSON line in
       C:\ccdc\evidence\evidence_<HOST>.jsonl: what, where, when it was created,
-      who/where from if known, and what we did. Removing persistence only
-      earns points back if you can SHOW it, so this is written BEFORE removal.
+      who/where from if known, and what we did. An incident report needs proof
+      of what was removed, so this is written BEFORE removal.
     #>
     param([Parameter(Mandatory = $true)][hashtable]$Item)
     try {

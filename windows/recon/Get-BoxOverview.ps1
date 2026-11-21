@@ -7,7 +7,7 @@
       First thing you run on an unfamiliar Windows box. Answers: what OS, what
       role in the domain, what IPs, what is listening and which process owns
       it, which roles/features are installed, which services run, which
-      patches are installed, and which listeners are probably SCORED.
+      patches are installed, and which well-known services are listening.
 
     WHAT IT READS
       WMI/CIM (Win32_OperatingSystem, Win32_ComputerSystem, Win32_Service),
@@ -52,8 +52,7 @@ Initialize-Ccdc -ScriptName 'Get-BoxOverview' -OutFile $OutFile -ReadOnly
 $config  = Get-CcdcConfig -Path $ConfigPath
 $hostCfg = Get-CcdcHostConfig -Config $config
 
-# Ports -> friendly name. Used to guess what a listener is and whether it is
-# probably scored. Ports in the config's scoredPorts always win.
+# Ports -> friendly name, so a listener is shown as the service it usually is.
 $wellKnown = @{
     21 = 'FTP'; 22 = 'SSH'; 23 = 'Telnet'; 25 = 'SMTP'; 53 = 'DNS'; 80 = 'HTTP'; 88 = 'Kerberos'
     110 = 'POP3'; 465 = 'SMTPS'; 995 = 'POP3S'; 1194 = 'OpenVPN'; 2049 = 'NFS'; 5800 = 'VNC (web)'; 5900 = 'VNC'; 5901 = 'VNC :1'
@@ -63,8 +62,8 @@ $wellKnown = @{
     3306 = 'MySQL'; 3389 = 'RDP'; 5432 = 'PostgreSQL'; 5985 = 'WinRM HTTP'; 5986 = 'WinRM HTTPS'
     8080 = 'HTTP alt'; 8443 = 'HTTPS alt'; 9389 = 'AD Web Services'
 }
-# Ports commonly used by the scoring engine in CCDC-style events.
-$commonlyScored = @(21, 22, 23, 25, 53, 80, 88, 110, 143, 389, 443, 445, 465, 587, 636, 993, 995, 1194, 1433, 2049, 3306, 3389, 5432, 5900, 5901, 8000, 8080, 8443)
+# Ports that real services listen on (anything else on a high port is usually RPC / ephemeral).
+$serviceTcpPorts = @(21, 22, 23, 25, 53, 80, 88, 110, 143, 389, 443, 445, 465, 587, 636, 993, 995, 1194, 1433, 2049, 3306, 3389, 5432, 5900, 5901, 8000, 8080, 8443)
 $scoredFromConfig = @()
 if ($hostCfg) { $scoredFromConfig = @($hostCfg.scoredPorts.tcp) }
 
@@ -83,7 +82,7 @@ Write-Finding -Level INFO -Category 'Identity' -Message ("PowerShell: {0}" -f $P
 if ($hostCfg) {
     Write-Finding -Level GREEN -Category 'Identity' -Message ("Config match: '{0}' - {1}" -f $hostCfg.name, $hostCfg.role)
 } else {
-    Write-Finding -Level YELLOW -Category 'Identity' -Message 'Hostname not found in toolkit config - scored-port guesses are generic.'
+    $null = $hostCfg   # no config entry for this host: fine, nothing depends on it
 }
 
 # ---------------------------------------------------------------------------
@@ -137,7 +136,7 @@ if ($tcp) {
 $listeners = $listeners | Where-Object { -not ($_.Proto -eq 'UDP' -and $_.Port -ge 49152) } |
     Sort-Object Proto, Port, PID -Unique
 
-$likelyScored = @()
+$exposedServices = @()
 foreach ($l in $listeners) {
     $p    = $procs[$l.PID]
     $name = if ($p) { $p.Name } else { '?' }
@@ -152,23 +151,23 @@ foreach ($l in $listeners) {
     elseif ($l.Proto -eq 'TCP' -and $l.Port -lt 49152 -and -not $what -and $l.Address -notmatch '^(127\.|::1)') { $level = 'YELLOW' }
     Write-Finding -Level $level -Category 'Listener' -Message $msg -Detail $path
 
-    if ($l.Proto -eq 'TCP' -and ($scoredFromConfig -contains $l.Port -or $commonlyScored -contains $l.Port) -and $l.Address -notmatch '^(127\.|::1)') {
-        $likelyScored += ('{0}/{1}' -f $l.Port, $(if ($what) { $what } else { $name }))
+    if ($l.Proto -eq 'TCP' -and ($scoredFromConfig -contains $l.Port -or $serviceTcpPorts -contains $l.Port) -and $l.Address -notmatch '^(127\.|::1)') {
+        $exposedServices += ('{0}/{1}' -f $l.Port, $(if ($what) { $what } else { $name }))
     }
 }
 
 # ---------------------------------------------------------------------------
-Write-Section 'Likely scored services'
+Write-Section 'Services on well-known ports'
 # ---------------------------------------------------------------------------
-$likelyScored = $likelyScored | Sort-Object -Unique
-if ($likelyScored) { Write-Finding -Level GREEN -Category 'Scored' -Message ('Listening now: {0}' -f ($likelyScored -join ', ')) }
+$exposedServices = $exposedServices | Sort-Object -Unique
+if ($exposedServices) { Write-Finding -Level INFO -Category 'Services' -Message ('Listening on the network: {0}' -f ($exposedServices -join ', ')) }
 foreach ($port in $scoredFromConfig) {
     if (-not ($listeners | Where-Object { $_.Proto -eq 'TCP' -and $_.Port -eq [int]$port })) {
-        Write-Finding -Level RED -Category 'Scored' -Message ("Config says TCP $port is scored on this box but NOTHING is listening") -Detail 'Check the service is running before anything else.'
+        Write-Finding -Level RED -Category 'Services' -Message ("Config lists TCP $port for this box but NOTHING is listening") -Detail 'Check the service is running before anything else.'
     }
 }
 if ($hostCfg -and $hostCfg.scoredServices) {
-    Write-Finding -Level INFO -Category 'Scored' -Message ('Config scored services: {0}' -f ($hostCfg.scoredServices -join ', '))
+    Write-Finding -Level INFO -Category 'Services' -Message ('Services listed in the config: {0}' -f ($hostCfg.scoredServices -join ', '))
 }
 
 # ---------------------------------------------------------------------------

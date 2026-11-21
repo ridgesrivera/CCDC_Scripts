@@ -4,11 +4,10 @@
 
 .DESCRIPTION
     PURPOSE
-      Red Team scores for data, not only for shells: customer PII is 200
-      points, card numbers 50, sensitive files 25, password dumps 50 - per
-      system. Anonymous access and data leakage cost 700 points at Regionals.
-      The season's lesson: "find PII and card data in the first hour and
-      restrict it". This script finds it; you decide where it should live.
+      Attackers go after data, not only shells: customer PII, card numbers,
+      password lists and config files with credentials are what a real breach
+      report is about. Find that data early and restrict who can read it.
+      This script finds it; you decide where it should live.
 
     WHAT IT LOOKS FOR
       In file CONTENT (text files, configs, CSV/SQL dumps, .docx / .xlsx):

@@ -49,21 +49,21 @@ $ReportDir = 'C:\ccdc\reports'
 $menu = @(
     # MONITOR
     @{ Key = 'D';  Sec = 'MON'; Name = 'LIVE ALERTS';           File = 'alerts\bt-alerts.ps1';            RO = $false; Desc = 'Instant popup when Red Team acts: who, from which IP, how they got in, what that IP did before, and the undo commands. Install, watch, trust/block an IP, story of an IP, self-test.' }
-    @{ Key = 'C';  Sec = 'MON'; Name = 'Scored services';       File = 'hunt\Test-ScoredServices.ps1';    RO = $true;  Desc = 'Listener -> service -> firewall -> real answer for every scored port, and WHY it is down. Loop mode beeps on a change.' }
+    @{ Key = 'C';  Sec = 'MON'; Name = 'Service health';        File = 'hunt\Test-ScoredServices.ps1';    RO = $true;  Desc = 'Listener -> service -> firewall -> real answer for each service port, and WHY it is down. Loop mode beeps on a change.' }
     @{ Key = 'N';  Sec = 'MON'; Name = 'Who is on this box';    File = 'alerts\whoshere.ps1';             RO = $true;  Desc = 'One screen: sessions, remote connections, recent logons, new users/tasks/services, diff vs baseline.' }
     # SNAPSHOT & ROLLBACK
     @{ Key = 'S';  Sec = 'SNP'; Name = 'Take snapshot';         File = 'backup\Snapshot-State.ps1';       RO = $true;  Desc = 'Save the security state now: registry security settings, services, users, admin groups, shares, hosts, Defender, firewall, audit + security policy. The first one is the ORIGINAL.' }
     @{ Key = 'W';  Sec = 'SNP'; Name = 'What changed?';         File = 'backup\Snapshot-State.ps1';       RO = $true;  Desc = 'Every setting that changed since a snapshot, marked [toolkit] or NOT BY THE TOOLKIT; plus new users/tasks/services/keys since the change baseline.' }
     @{ Key = 'U';  Sec = 'SNP'; Name = 'Undo changes';          File = 'backup\Snapshot-State.ps1';       RO = $false; Desc = 'Something broke? Pick a snapshot, pick the changes, put them back (each confirmed, backed up, and undoable).' }
     # AUDIT
-    @{ Key = '1';  Sec = 'AUD'; Name = 'Box overview';          File = 'recon\Get-BoxOverview.ps1';       RO = $true;  Desc = 'OS, role, IPs, listeners -> process, roles, patches, likely scored services.' }
+    @{ Key = '1';  Sec = 'AUD'; Name = 'Box overview';          File = 'recon\Get-BoxOverview.ps1';       RO = $true;  Desc = 'OS, role, IPs, listeners -> process, roles, installed services, patches.' }
     @{ Key = '2';  Sec = 'AUD'; Name = 'Users & admins';        File = 'audit\Audit-Users.ps1';           RO = $true;  Desc = 'Admin groups, roastable accounts, passwords in descriptions, new accounts.' }
     @{ Key = '3';  Sec = 'AUD'; Name = 'Persistence hunt';      File = 'audit\Audit-Persistence.ps1';     RO = $true;  Desc = 'Tasks, services, Run keys, WMI, IFEO/sticky keys, SSH keys, web shells.' }
     @{ Key = '4';  Sec = 'AUD'; Name = 'Network exposure';      File = 'audit\Audit-Network.ps1';         RO = $true;  Desc = 'Connections, firewall, SMBv1/signing, shares, RDP NLA, WinRM.' }
     @{ Key = '5';  Sec = 'AUD'; Name = 'Vulns (CVE check)';     File = 'audit\Audit-Vulns.ps1';           RO = $true;  Desc = 'Zerologon, PrintNightmare, EternalBlue, noPac, PetitPotam, Certifried, SIGRed, HiveNightmare, IPv6 RCE, SMB reflection, relay, cleartext creds... NOW vs ORIGINAL snapshot: what you fixed, what regressed.' }
     @{ Key = '6';  Sec = 'AUD'; Name = 'AD + GPO (DC)';         File = 'audit\Audit-AD-GPO.ps1';          RO = $true;  Desc = 'GPO changes, DCSync rights, root ACL, delegation, krbtgt age.' }
     @{ Key = '7';  Sec = 'AUD'; Name = 'Security policy';       File = 'audit\Audit-SecurityPolicy.ps1';  RO = $true;  Desc = 'GPO/AD/DNS settings safe to turn on, with the GPO path and check/fix commands.' }
-    @{ Key = '8';  Sec = 'AUD'; Name = 'PII / sensitive files'; File = 'audit\Audit-SensitiveFiles.ps1';  RO = $true;  Desc = 'SSNs, card numbers, passwords, keys in files (and SQL Server) + who can read them. PII loss is a big penalty.' }
+    @{ Key = '8';  Sec = 'AUD'; Name = 'PII / sensitive files'; File = 'audit\Audit-SensitiveFiles.ps1';  RO = $true;  Desc = 'SSNs, card numbers, passwords, keys in files (and SQL Server) + who can read them.' }
     @{ Key = '9';  Sec = 'AUD'; Name = 'Software audit';        File = 'audit\Audit-Software.ps1';        RO = $true;  Desc = 'Remote-access tools, attack tools, junk -> inventory CSV for injects.' }
     @{ Key = 'E';  Sec = 'AUD'; Name = 'Event-log sweep';       File = 'hunt\Watch-Events.ps1';           RO = $true;  Desc = 'Look back N minutes: new users, tasks, services, logons, tampering, DCSync, roasting, each with source IP.' }
     @{ Key = 'T';  Sec = 'AUD'; Name = 'Vendor tool audits';    File = 'audit\Invoke-AuditTools.ps1';     RO = $true;  Desc = 'Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith (stage with tools\Get-CcdcTools.ps1).' }

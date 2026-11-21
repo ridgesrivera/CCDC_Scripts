@@ -4,9 +4,8 @@
 
 .DESCRIPTION
     PURPOSE
-      Incident reports earn points only when they name a source address that
-      traces back to Red Team, and they are worth the most when filed within
-      minutes. Under pressure nobody has time to dig through event logs, so
+      A useful incident report names the source address the attack came from
+      and is filed quickly. Under pressure nobody has time to dig through event logs, so
       this script does the digging for a time window and writes a worksheet:
 
         1. Candidate SOURCE ADDRESSES, ranked, each with the reasons it is

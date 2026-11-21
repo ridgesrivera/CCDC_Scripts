@@ -12,7 +12,7 @@ Before a session, plant a few things for students to find (see "Plant list" at t
 
 ## Session 1: Recon and the panel (30 min)
 - **Manual:** `hostname`, `ipconfig /all`, `netstat -ano | findstr LISTENING`, `tasklist /FI "PID eq 1234"`.
-- **Script:** panel `[1]` Get-BoxOverview. Point at the "Likely scored services" section.
+- **Script:** panel `[1]` Get-BoxOverview. Point at the "Services on well-known ports" section.
 - **Code:** the `$wellKnown` port table, and how listeners are mapped to processes by PID.
 - **Discuss:** Why is a listener running from `C:\Users\Public` RED? Why does a DC listen on so many ports?
 

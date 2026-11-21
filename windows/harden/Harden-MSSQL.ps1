@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     PURPOSE
-      The most expensive single host of the season was a SQL Server (825
-      points across two findings). SQL Server has features that reach outside
+      A SQL Server is a common way from one weak password to the whole box.
+      SQL Server has features that reach outside
       the database: xp_cmdshell runs operating-system commands as the service
       account, so anyone with a sysadmin login (or the default 'sa' password)
       owns the box. This script audits, then turns those features off.
