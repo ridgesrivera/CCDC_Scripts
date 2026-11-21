@@ -6,15 +6,14 @@
     PURPOSE
       Find rogue/unexpected admins and risky account settings that the Red
       Team abuses: Kerberoastable SPN accounts, AS-REP roastable accounts,
-      passwords sitting in description fields, accounts created in the last
-      few days, and AdminSDHolder-protected (adminCount=1) leftovers.
+      passwords sitting in description fields, accounts created on their own
+      after the environment was set up, and adminCount=1 leftovers.
+      Output is grouped: one line per admin group, one line per kind of problem.
 
     WHAT IT READS
       * Local users + local groups (ADSI WinNT provider - works on 2012 R2+)
       * Domain users/groups over LDAP (System.DirectoryServices). This works
         on ANY domain-joined box, even without the ActiveDirectory module.
-      * Security event log: 4720 (user created), 4728/4732/4756 (added to a
-        security group) for the last -RecentDays days.
 
     WHAT IT CHANGES
       Nothing. Writes only its own log in C:\ccdc\logs\ and the optional report.
@@ -38,16 +37,12 @@
 .PARAMETER ExpectedAdmins
     Account names you EXPECT in admin groups (shown GREEN). Everyone else is RED.
 
-.PARAMETER RecentDays
-    How far back counts as "recently created/modified". Default 7.
-
 .EXAMPLE
     .\Audit-Users.ps1 -ExpectedAdmins Administrator,jdoe -OutFile C:\ccdc\reports\users.csv
 #>
 [CmdletBinding()]
 param(
     [string[]]$ExpectedAdmins = @('Administrator'),
-    [int]$RecentDays = 7,
     [string]$OutFile,
     [string]$ConfigPath
 )
@@ -56,7 +51,6 @@ param(
 Initialize-Ccdc -ScriptName 'Audit-Users' -OutFile $OutFile -ReadOnly
 $null    = Get-CcdcConfig -Path $ConfigPath
 $isDC    = Test-CcdcIsDC
-$cutoff  = (Get-Date).AddDays(-$RecentDays)
 # Words that suggest a password was left in a description/info field.
 $pwRegex = '(?i)(pass(word)?|pwd|pw\s*[:=]|cred|secret|p@ss)'
 
@@ -175,7 +169,7 @@ if (-not $rootDse -or -not $rootDse.defaultNamingContext) {
     Write-Section 'Domain account risks (grouped)'
     $users = @(Search-Ldap -Filter '(&(objectCategory=person)(objectClass=user))' -Properties $userProps)
     $b = @{ NoPw = @(); AsRep = @(); Kerb = @(); KerbPriv = @(); Deleg = @(); PwDesc = @(); Orphan = @(); Never = 0 }
-    $created = @()
+    $created = @(); $pwShow = @()
     $enabled = 0
     $buildTime = $null
     foreach ($u in $users) {
@@ -183,7 +177,8 @@ if (-not $rootDse -or -not $rootDse.defaultNamingContext) {
         $uac = [int](Get-Prop $u 'useraccountcontrol')
         $isEnabled = -not ($uac -band $UAC_DISABLED)
         if ($isEnabled) { $enabled++ }
-        $wc = Get-Prop $u 'whencreated'; if ($wc) { $created += [pscustomobject]@{ Sam = $sam; Time = [datetime]$wc } }
+        # whenCreated comes back in UTC: convert so times match the event log and the clock on the wall.
+        $wc = Get-Prop $u 'whencreated'; if ($wc) { $wc = [datetime]::SpecifyKind([datetime]$wc, 'Utc').ToLocalTime(); $created += [pscustomobject]@{ Sam = $sam; Time = $wc } }
         if ($sam -eq 'krbtgt' -and $wc) { $buildTime = [datetime]$wc }   # krbtgt is created when the domain is built
         if (-not $isEnabled) { continue }
         if ($uac -band $UAC_PASSWD_NOTREQD) { $b.NoPw += $sam }
@@ -193,7 +188,7 @@ if (-not $rootDse -or -not $rootDse.defaultNamingContext) {
         if ($u.Properties['serviceprincipalname'].Count -gt 0 -and $sam -ne 'krbtgt') { if ($privMembers.ContainsKey($sam)) { $b.KerbPriv += $sam } else { $b.Kerb += $sam } }
         foreach ($field in @('description', 'info')) {
             $val = [string](Get-Prop $u $field)
-            if ($val -and $val -match $pwRegex) { $b.PwDesc += "$sam ($field)"; Write-Host "       ${sam} ${field}: $val" -ForegroundColor DarkYellow }   # screen only - never logged
+            if ($val -and $val -match $pwRegex) { $b.PwDesc += "$sam ($field)"; $pwShow += "${sam} ${field}: $val" }   # shown on screen only, never logged
         }
         if ([int](Get-Prop $u 'admincount') -eq 1 -and -not $privMembers.ContainsKey($sam) -and $sam -ne 'krbtgt') { $b.Orphan += $sam }
     }
@@ -205,6 +200,7 @@ if (-not $rootDse -or -not $rootDse.defaultNamingContext) {
     Show-Bucket RED 'ASREPRoast' 'AS-REP roastable (no Kerberos pre-auth)' $b.AsRep 'Anyone can get a crackable hash for these WITHOUT a password. Fix: panel 12 (hardening walkthrough) or Set-ADAccountControl <user> -DoesNotRequirePreAuth $false'
     Show-Bucket RED 'NoPassword' 'Password not required (PASSWD_NOTREQD)' $b.NoPw 'These may have an EMPTY password. Fix: panel 12, or set a password and clear the flag.'
     Show-Bucket RED 'PwInDescription' 'Password written in the description' $b.PwDesc 'Anyone in the domain can read descriptions. Change that password and clear the field.'
+    foreach ($line in $pwShow) { Write-Host "       $line" -ForegroundColor DarkYellow }   # screen only
     Show-Bucket RED 'Delegation' 'Unconstrained delegation on a user' $b.Deleg 'Their tickets can be used to impersonate anyone. Remove "Trust this user for delegation".'
     Show-Bucket YELLOW 'Kerberoast' 'Kerberoastable (service accounts with an SPN)' $b.Kerb 'Crackable offline if the password is weak. Give them long random passwords (check what service uses them first).'
     Show-Bucket YELLOW 'AdminSDHolder' 'adminCount=1 but not in an admin group now' $b.Orphan 'A former admin, or a sign someone was briefly made admin. Check who changed it.'
@@ -222,35 +218,5 @@ if (-not $rootDse -or -not $rootDse.defaultNamingContext) {
     Write-Finding -Level INFO -Category 'Account' -Message ("{0} domain user accounts, {1} enabled" -f $users.Count, $enabled)
 }
 
-# ---------------------------------------------------------------------------
-# Security log: privileged group adds listed one by one; everything else summarized
-# ---------------------------------------------------------------------------
-Write-Section "Security log: accounts created / added to groups (last $RecentDays days)"
-$privNames = @('Domain Admins', 'Enterprise Admins', 'Schema Admins', 'Administrators', 'DnsAdmins', 'Backup Operators', 'Account Operators', 'Server Operators', 'Group Policy Creator Owners', 'Remote Desktop Users', 'Remote Management Users', 'Pre-Windows 2000 Compatible Access')
-try {
-    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4720, 4728, 4732, 4756; StartTime = $cutoff } -MaxEvents 2000 -ErrorAction Stop)
-    $made = @(); $other = 0
-    foreach ($e in ($events | Sort-Object TimeCreated)) {
-        $d = Get-CcdcEventData -Record $e
-        $who = "$($d['SubjectDomainName'])\$($d['SubjectUserName'])"
-        if ($d['SubjectUserName'] -match '\$$|^ANONYMOUS LOGON$|^-$') { continue }   # Windows itself (domain build, machine setup)
-        if ($e.Id -eq 4720) { $made += [pscustomobject]@{ T = $e.TimeCreated.ToString('MM-dd HH:mm'); Who = $who; Name = $d['TargetUserName'] }; continue }
-        if ($privNames -contains $d['TargetUserName']) {
-            $member = ($d['MemberName'] -replace '^CN=([^,]+),.*$', '$1'); if (-not $member -or $member -eq '-') { $member = $d['MemberSid'] }
-            Write-Finding -Level RED -Category 'SecLog' -Message ("{0}  {1} -> {2}  (by {3})" -f $e.TimeCreated.ToString('MM-dd HH:mm'), $member, $d['TargetUserName'], $who)
-        } else { $other++ }
-    }
-    foreach ($g in ($made | Group-Object T, Who)) {
-        $lvl = if ($g.Count -ge 5) { 'INFO' } else { 'YELLOW' }
-        $first = $g.Group[0]
-        $list = ($g.Group | Select-Object -First 8 | ForEach-Object { $_.Name }) -join ', '
-        if ($g.Count -gt 8) { $list += ", ... +$($g.Count - 8) more" }
-        Write-Finding -Level $lvl -Category 'SecLog' -Message ("{0}  {1} account(s) created by {2}: {3}" -f $first.T, $g.Count, $first.Who, $list)
-    }
-    if ($other) { Write-Finding -Level INFO -Category 'SecLog' -Message "$other add(s) to non-admin groups (not listed)." }
-    if (-not $events) { Write-Finding -Level INFO -Category 'SecLog' -Message 'No matching events.' }
-} catch {
-    Write-Finding -Level INFO -Category 'SecLog' -Message 'No matching events (or Security log not readable / auditing off).'
-}
-
+# History (who added whom, when) is in LIVE ALERTS (panel D -> 7) and Find-Attacks (panel E).
 Complete-Ccdc
