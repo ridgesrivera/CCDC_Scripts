@@ -25,12 +25,17 @@ competition, and for teaching newer club members. Read `README.md` (hard rules, 
 
 ## Layout you'll touch most
 ```
-windows/Launch-Toolkit.ps1   menu panel ($menu table + Get-ScriptParams + Invoke-Entry; [D] -> Invoke-LiveAlerts)
+CCDC-Toolkit.bat             root launcher -> windows/Launch-Toolkit.bat (self-elevates, unblocks, opens panel)
+install.ps1                  one-line download/installer (irm ... | iex) -> C:\ccdc\toolkit
+windows/Launch-Toolkit.ps1   the panel: $menu table (Key/Sec/Name/File/RO/Desc) + Get-ScriptParams + Invoke-Entry;
+                             status header (Get-AlertStatus), [0] guided first-15 (Invoke-FirstSteps),
+                             [D] -> Invoke-LiveAlerts, loops (-Loop) open in a new window (Start-InNewWindow)
 windows/lib/CCDC-Common.ps1  shared helpers for recon/audit/harden/... (NOT used by windows/alerts)
 windows/alerts/              LIVE ALERTS bundle: standalone on purpose (see below)
 tools/build-alert-paste.py   regenerates windows/alerts/bt-deploy-PASTE.txt
 tools/lint/Test-PsSyntax.ps1 parse + PS 5.1 compatibility lint
 docs/live-alerts.md          design, detections, limits, test status, lessons learned for the alerts
+docs/events/                 per-event notes from team packets (box roles, scoring, penalties). Docs only, never code
 ```
 
 ## windows/alerts: how it works (read docs/live-alerts.md for detail)
@@ -79,8 +84,11 @@ docs/live-alerts.md          design, detections, limits, test status, lessons le
 3. CHAIN links by IP only. Consider also linking by account (who) for SYSTEM/webshell activity, without noise.
 4. `netlogon` only fires on NTLM (keeps DCs quiet). Consider a low-noise Kerberos rule (e.g. type 3 from IPs
    never seen before) if it can stay quiet on a busy DC.
-5. Overlap: `alerts/whoshere.ps1 -SaveBaseline` and `hunt/Watch-Changes.ps1` both diff a baseline. Decide
-   whether to merge or clearly split roles (whoshere = one screen now; Watch-Changes = periodic diff).
-6. `pii-hunt.ps1` overlaps `legacy/05_PIIScanner.ps1`; the new one supersedes it.
+5. Roles are now split in the panel: `D` bt-alerts = the live monitor; `E` Watch-Events = look-back sweep of the
+   event logs (its -Loop mode still works but is not offered by the panel, to avoid two live monitors);
+   `N` whoshere = one screen now; `W` Watch-Changes = periodic diff. Consider folding Watch-Events detections
+   that bt-alerts lacks (DCSync, Zerologon, GPO edits, web-server-spawns-shell) into bt-alerts as triggers.
+6. `pii-hunt.ps1` overlaps `legacy/05_PIIScanner.ps1` and `audit/Audit-SensitiveFiles.ps1`; panel `F` offers both
+   (deep file scan vs quick hunt incl. SQL Server).
 7. Linux equivalents (auditd / journald based), same output format.
 8. Add `tools/lint` coverage for the paste rules (no `'@` lines, ASCII) so CI catches them.

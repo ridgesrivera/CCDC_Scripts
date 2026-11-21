@@ -5,6 +5,14 @@ Do preserve *before* remove: the evidence is what earns points on an incident re
 
 Start an IR note on paper (or the team doc) right away: **time found, box, who found it, what you saw.**
 
+**The fast path (scripts do preserve + record for you):**
+1. `hunt\Remove-Persistence.ps1`: pick the item from the list. It exports it, hashes the payload, looks up who created it and from which IP, then disables/quarantines it.
+2. `harden\Disable-Accounts.ps1` + `harden\Disconnect-Sessions.ps1 -User <name>` for the account they used; rotate what it could read.
+3. `hunt\New-IncidentReport.ps1 -Title "..."`: candidate source IPs, timeline, what was removed. Fill in the wording yourselves and submit **with the source IP and the box's public 10.100.1XX.Y address**. A report without a source IP earns nothing.
+4. Domain admin was compromised? `harden\Reset-Krbtgt.ps1`, wait, run it again.
+
+The tables below are the same steps by hand.
+
 ---
 
 ## A. Rogue admin account (e.g. `hacker` in Domain Admins)
@@ -20,8 +28,8 @@ Start an IR note on paper (or the team doc) right away: **time found, box, who f
 | Verify | Watch for it coming back | `hunt\Watch-Changes.ps1 -Loop` |
 
 If it had Domain Admin, also plan a **krbtgt double reset** (golden tickets survive password changes):
-reset krbtgt → wait for replication (single DC: a few minutes) → reset again. Use Microsoft's
-`New-KrbtgtKeys.ps1` if available, or `Set-ADAccountPassword krbtgt -Reset` twice. Tell the captain first:
+reset krbtgt → wait for replication (single DC: a few minutes) → reset again. `harden\Reset-Krbtgt.ps1`
+does one reset per run and checks replication (by hand: `Set-ADAccountPassword krbtgt -Reset` twice). Tell the captain first:
 existing Kerberos tickets get invalidated and services may hiccup.
 
 ## B. Web shell (e.g. `C:\inetpub\wwwroot\wp-content\uploads\x.php`)

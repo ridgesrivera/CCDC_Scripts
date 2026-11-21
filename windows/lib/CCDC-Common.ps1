@@ -344,3 +344,198 @@ function Test-CcdcTranscriptionOn {
     $v = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
     return ($v -and $v.EnableTranscripting -eq 1)
 }
+
+# ---------------------------------------------------------------------------
+# Hunt helpers: event parsing, "is this IP ours?", alerts, evidence, quarantine.
+# Used by hunt\Watch-Events, hunt\Remove-Persistence, hunt\Test-ScoredServices
+# and hunt\New-IncidentReport so they all write to the same places:
+#   C:\ccdc\alerts\alerts_<HOST>.csv        one row per alert (time, rule, user, source IP)
+#   C:\ccdc\evidence\evidence_<HOST>.jsonl  one JSON object per thing we removed
+#   C:\ccdc\quarantine\<stamp>\             files moved out of harm's way
+# An incident report without a source IP earns nothing, so every helper here
+# tries to keep the IP next to the finding.
+# ---------------------------------------------------------------------------
+$script:CcdcAlertRoot      = Join-Path $script:CcdcRoot 'alerts'
+$script:CcdcEvidenceRoot   = Join-Path $script:CcdcRoot 'evidence'
+$script:CcdcQuarantineRoot = Join-Path $script:CcdcRoot 'quarantine'
+
+function Get-CcdcEventData {
+    <#
+      Turns one event record (from Get-WinEvent) into a hashtable of its named
+      fields, e.g. $d.TargetUserName, $d.IpAddress. We read the event XML
+      instead of the rendered Message because the XML field names are the same
+      on every language of Windows and do not need parsing with regexes.
+    #>
+    param([Parameter(Mandatory = $true)]$Record)
+    $d = @{}
+    try { $x = [xml]$Record.ToXml() } catch { return $d }
+    $i = 0
+    foreach ($n in $x.SelectNodes("//*[local-name()='EventData']/*")) {
+        $name = $n.GetAttribute('Name')
+        if (-not $name) { $name = "Data$i" }
+        $d[$name] = $n.InnerText
+        $i++
+    }
+    # A few events (log cleared 1102/104, RDP 1149) use <UserData> instead.
+    foreach ($n in $x.SelectNodes("//*[local-name()='UserData']//*[not(*)]")) { $d[$n.LocalName] = $n.InnerText }
+    return $d
+}
+
+function ConvertTo-CcdcIp {
+    # Normalises the address formats event logs use: '-', '::ffff:10.0.0.5', '10.0.0.5:51234'.
+    param([string]$Text)
+    if (-not $Text) { return '' }
+    $t = $Text.Trim()
+    if ($t -eq '-' -or $t -eq 'LOCAL') { return '' }
+    $t = $t -replace '^::ffff:', ''
+    if ($t -match '^(\d{1,3}(\.\d{1,3}){3}):\d+$') { $t = $Matches[1] }
+    return $t
+}
+
+function Test-CcdcIpInCidr {
+    # $true if $Ip is inside $Cidr ("192.168.220.0/24"; a bare address means that one host).
+    param([string]$Ip, [string]$Cidr)
+    try {
+        $addr  = [System.Net.IPAddress]::Parse($Ip)
+        $parts = $Cidr -split '/'
+        $net   = [System.Net.IPAddress]::Parse($parts[0])
+        if ($addr.AddressFamily -ne $net.AddressFamily) { return $false }
+        $a = $addr.GetAddressBytes(); $n = $net.GetAddressBytes()
+        $bits = if ($parts.Count -gt 1) { [int]$parts[1] } else { $a.Length * 8 }
+        for ($i = 0; $i -lt $a.Length; $i++) {
+            # How many bits of this byte belong to the network part (8, then fewer, then 0).
+            $take = [Math]::Min(8, [Math]::Max(0, $bits - (8 * $i)))
+            if ($take -eq 0) { break }
+            $mask = (0xFF -shl (8 - $take)) -band 0xFF
+            if (($a[$i] -band $mask) -ne ($n[$i] -band $mask)) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+function Get-CcdcTrustedRanges {
+    # Our own ranges: config subnet + adminSources. Everything else is "outside".
+    param($Config, [string[]]$Extra = @())
+    $r = @($Extra)
+    if ($Config) {
+        if ($Config.subnet) { $r += [string]$Config.subnet }
+        foreach ($a in @($Config.adminSources)) { if ($a) { $r += [string]$a } }
+    }
+    return @($r | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Get-CcdcLocalIps {
+    # This machine's own addresses (so "connection from myself" is not an alert).
+    $ips = @('127.0.0.1', '::1')
+    try {
+        foreach ($nic in (Get-WmiObject Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)) { $ips += @($nic.IPAddress) }
+    } catch { $null = $_ }
+    return @($ips | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Get-CcdcIpClass {
+    <#
+      'local'   = empty / loopback / this machine
+      'trusted' = inside the team ranges from the config (or -Ranges)
+      'outside' = anything else. NOT automatically Red Team: the scoring engine
+                  and customers also come from outside. But an admin logon,
+                  RDP session or new account from 'outside' deserves a look.
+      'unknown' = no ranges configured, so we cannot tell
+    #>
+    param([string]$Ip, [string[]]$Ranges = @(), [string[]]$LocalIps = @())
+    $ip2 = ConvertTo-CcdcIp $Ip
+    if (-not $ip2 -or $ip2 -match '^(127\.|::1$|fe80:)' -or $LocalIps -contains $ip2) { return 'local' }
+    if (-not $Ranges -or $Ranges.Count -eq 0) { return 'unknown' }
+    foreach ($c in $Ranges) { if (Test-CcdcIpInCidr -Ip $ip2 -Cidr $c) { return 'trusted' } }
+    return 'outside'
+}
+
+function Write-CcdcAlert {
+    <#
+      Appends one row to C:\ccdc\alerts\alerts_<HOST>.csv. This file is the
+      shared "what did we see, when, from where" record: Watch-Events,
+      Test-ScoredServices and the scheduled Watch-Changes all write to it,
+      and New-IncidentReport reads it. Never pass secrets in -Detail.
+    #>
+    param(
+        [string]$Level = 'YELLOW', [Parameter(Mandatory = $true)][string]$Rule,
+        [string]$User = '', [string]$SourceIp = '', [string]$Detail = '',
+        [string]$Source = '', [datetime]$Time = (Get-Date)
+    )
+    try {
+        if (-not (Test-Path $script:CcdcAlertRoot)) { New-Item -ItemType Directory -Path $script:CcdcAlertRoot -Force -WhatIf:$false | Out-Null }
+        $file = Join-Path $script:CcdcAlertRoot ("alerts_{0}.csv" -f $env:COMPUTERNAME)
+        $flat = ($Detail -replace '\s+', ' ')
+        if ($flat.Length -gt 600) { $flat = $flat.Substring(0, 600) + '...' }
+        [pscustomobject]@{
+            Time = $Time.ToString('yyyy-MM-dd HH:mm:ss'); Host = $env:COMPUTERNAME; Level = $Level; Rule = $Rule
+            User = $User; SourceIp = $SourceIp; Detail = $flat; Source = $Source
+        } | Export-Csv -Path $file -Append -NoTypeInformation -Encoding UTF8 -WhatIf:$false
+    } catch { Write-CcdcLog "ALERT file write failed: $($_.Exception.Message)" 'ERROR' }
+}
+
+function Get-CcdcFileHash {
+    # SHA256 of a file via .NET (Get-FileHash does not exist on PowerShell 3 / Server 2012).
+    param([Parameter(Mandatory = $true)][string]$Path)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $fs  = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+        try { return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '') } finally { $fs.Close(); $sha.Dispose() }
+    } catch { return '' }
+}
+
+function Get-CcdcQuarantineDir {
+    # One quarantine folder per script run. It is OUTSIDE every web root on purpose.
+    $dir = Join-Path $script:CcdcQuarantineRoot $script:CcdcStamp
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force -WhatIf:$false | Out-Null }
+    return $dir
+}
+
+function Add-CcdcEvidence {
+    <#
+      Records one removed/contained item as a JSON line in
+      C:\ccdc\evidence\evidence_<HOST>.jsonl: what, where, when it was created,
+      who/where from if known, and what we did. Removing persistence only
+      earns points back if you can SHOW it, so this is written BEFORE removal.
+    #>
+    param([Parameter(Mandatory = $true)][hashtable]$Item)
+    try {
+        if (-not (Test-Path $script:CcdcEvidenceRoot)) { New-Item -ItemType Directory -Path $script:CcdcEvidenceRoot -Force -WhatIf:$false | Out-Null }
+        $file = Join-Path $script:CcdcEvidenceRoot ("evidence_{0}.jsonl" -f $env:COMPUTERNAME)
+        $Item['RecordedAt'] = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        $Item['Host']       = $env:COMPUTERNAME
+        $Item['Operator']   = "$env:USERDOMAIN\$env:USERNAME"
+        Add-Content -Path $file -Value (([pscustomobject]$Item | ConvertTo-Json -Compress -Depth 4)) -Encoding UTF8 -WhatIf:$false
+        Write-CcdcLog ("EVIDENCE {0} {1}" -f $Item['Type'], $Item['Name']) 'EVIDENCE'
+        return $file
+    } catch { Write-CcdcLog "EVIDENCE write failed: $($_.Exception.Message)" 'ERROR'; return $null }
+}
+
+function Get-CcdcLogonSource {
+    <#
+      "Who was that?" -> "Where did they log on from?"
+      Account-change events (4720 user created, 4732 group add, 4698 task
+      created...) do not carry an IP address, but they do carry the LOGON ID
+      of the session that made the change. The matching 4624 logon event has
+      the same ID plus the source IP. Returns the IP address, or
+      'console (logon type N)' for a local session, or '' when it cannot be
+      found (log rolled over, or the change was made by SYSTEM).
+    #>
+    param([string]$LogonId, [int]$MaxHoursBack = 24)
+    if (-not $LogonId -or $LogonId -match '^0x3e[4-7]$') { return '' }   # SYSTEM / service logons have no remote source
+    if (-not $script:CcdcLogonCache) { $script:CcdcLogonCache = @{} }
+    if ($script:CcdcLogonCache.ContainsKey($LogonId)) { return $script:CcdcLogonCache[$LogonId] }
+    $result = ''
+    try {
+        $since = (Get-Date).AddHours(-$MaxHoursBack).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.000Z')
+        $xp = "*[System[EventID=4624 and TimeCreated[@SystemTime>='$since']] and EventData[Data[@Name='TargetLogonId']='$LogonId']]"
+        $ev = Get-WinEvent -LogName Security -FilterXPath $xp -MaxEvents 1 -ErrorAction Stop
+        if ($ev) {
+            $d = Get-CcdcEventData -Record $ev
+            $ip = ConvertTo-CcdcIp $d['IpAddress']
+            $result = if ($ip) { $ip } else { "console (logon type $($d['LogonType']))" }
+        }
+    } catch { $null = $_ }
+    $script:CcdcLogonCache[$LogonId] = $result
+    return $result
+}
