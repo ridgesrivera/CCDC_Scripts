@@ -467,12 +467,15 @@ function Invoke-KickMenu([string]$path) {
 }
 function Invoke-FirewallMenu([string]$path) {
     Write-Host '   [1] Turn on the basic firewall (step by step, safety timer)'
-    Write-Host '   [2] REVERT: put the firewall back exactly as it was'
+    Write-Host '   [2] REVERT: remove the toolkit''s rules, every profile back exactly as recorded'
     Write-Host '   [3] Status'
+    Write-Host '   [4] Full restore from the saved policy file (only if 2 was not enough)' -ForegroundColor DarkGray
+    Write-Host '   Locked out of the panel? Run C:\ccdc\firewall\revert.cmd as administrator.' -ForegroundColor DarkGray
     switch (Read-Host '  Choice') {
         '1' { Save-AutoSnapshot 'before-Set-Firewall'; & $path }
         '2' { & $path -Revert }
         '3' { & $path -Status }
+        '4' { & $path -RestoreFull }
         default { Write-Host '  Cancelled.' -ForegroundColor DarkGray }
     }
 }

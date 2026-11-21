@@ -59,15 +59,7 @@ if (-not $svc -or -not (Get-Command Get-MpComputerStatus -ErrorAction SilentlyCo
 Write-Finding -Level GREEN -Category 'Installed' -Message 'Defender is installed.'
 
 # ---------------------------------------------------------------------------
-Write-Section '2. Service'
-# ---------------------------------------------------------------------------
-if ($svc.State -ne 'Running') {
-    Write-Finding -Level RED -Category 'Service' -Message "WinDefend is $($svc.State) ($($svc.StartMode))"
-    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'WinDefend' -Action 'Start the Defender service' -ScriptBlock { Start-Service -Name WinDefend -ErrorAction Stop }
-} else { Write-Finding -Level GREEN -Category 'Service' -Message 'WinDefend running.' }
-
-# ---------------------------------------------------------------------------
-Write-Section '3. Group Policy switches that turn Defender off'
+Write-Section '2. Group Policy switches that turn Defender off (removed first: the service will not start while they are set)'
 # ---------------------------------------------------------------------------
 $offValues = @(
     @{ Key = $polKey; Name = 'DisableAntiSpyware' }, @{ Key = $polKey; Name = 'DisableAntiVirus' },
@@ -87,9 +79,41 @@ if ($found) {
 } else { Write-Finding -Level GREEN -Category 'Policy' -Message 'No policy switches turning Defender off.' }
 
 # ---------------------------------------------------------------------------
+Write-Section '3. Service'
+# ---------------------------------------------------------------------------
+$svc = Get-WmiObject Win32_Service -Filter "Name='WinDefend'" -ErrorAction SilentlyContinue
+if ($svc.StartMode -ne 'Auto') {
+    Write-Finding -Level RED -Category 'Service' -Message "WinDefend start mode is $($svc.StartMode) (normal: Automatic)"
+    $oldMode = $svc.StartMode
+    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'WinDefend' -Action 'Set start mode to Automatic' -Undo "sc.exe config WinDefend start= demand" -ScriptBlock {
+        $o = & sc.exe config WinDefend start= auto 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            # Defender's service is protected; the registry value is the fallback.
+            Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend' -Name Start -Value 2 -Type DWord -ErrorAction Stop
+        }
+    }
+    $null = $oldMode
+}
+$svc = Get-WmiObject Win32_Service -Filter "Name='WinDefend'" -ErrorAction SilentlyContinue
+if ($svc.State -ne 'Running') {
+    Write-Finding -Level RED -Category 'Service' -Message "WinDefend is $($svc.State)"
+    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'WinDefend' -Action 'Start the Defender service' -ScriptBlock {
+        Start-Service -Name WinDefend -ErrorAction Stop
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Service WinDefend).Status -ne 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+        if ((Get-Service WinDefend).Status -ne 'Running') { throw 'did not start within 30 s' }
+    }
+    if ((Get-Service WinDefend -ErrorAction SilentlyContinue).Status -ne 'Running') {
+        Write-Finding -Level YELLOW -Category 'Service' -Message 'Defender will not start yet. After removing a "turn off" policy, Windows often needs a REBOOT before Defender can start. Reboot when the captain agrees, then run this again.'
+    }
+} else { Write-Finding -Level GREEN -Category 'Service' -Message 'WinDefend running.' }
+$running = ((Get-Service WinDefend -ErrorAction SilentlyContinue).Status -eq 'Running')
+
+# ---------------------------------------------------------------------------
 Write-Section '4. Protection settings'
 # ---------------------------------------------------------------------------
-$pref = Get-MpPreference -ErrorAction SilentlyContinue
+$pref = if ($running) { Get-MpPreference -ErrorAction SilentlyContinue } else { $null }
+if (-not $running) { Write-Finding -Level INFO -Category 'Settings' -Message 'Skipped: the Defender service is not running (settings cannot be read or changed until it is).' }
 $offPrefs = @('DisableRealtimeMonitoring', 'DisableBehaviorMonitoring', 'DisableIOAVProtection', 'DisableScriptScanning' | Where-Object { $pref -and $pref.$_ })
 if ($offPrefs) {
     Write-Finding -Level RED -Category 'Settings' -Message ("Turned off: {0}" -f ($offPrefs -join ', '))
@@ -106,7 +130,23 @@ $excl = @()
 if ($pref) {
     foreach ($t in 'ExclusionPath', 'ExclusionProcess', 'ExclusionExtension') { foreach ($v in @($pref.$t | Where-Object { $_ })) { $excl += @{ Type = $t; Value = $v } } }
 }
-if (-not $excl) { Write-Finding -Level GREEN -Category 'Exclusions' -Message 'No exclusions.' }
+# Exclusions set by Group Policy live in a policy key an admin can edit even when Defender is off.
+$polEx = @()
+foreach ($t in 'Paths', 'Processes', 'Extensions') {
+    $k = "$polKey\Exclusions\$t"
+    $props = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
+    if ($props) { foreach ($pp in $props.PSObject.Properties) { if ($pp.Name -notlike 'PS*') { $polEx += @{ Key = $k; Name = $pp.Name } } } }
+}
+foreach ($e in $polEx) {
+    Write-Finding -Level YELLOW -Category 'Exclusions' -Message "Policy exclusion: $($e.Name)"
+    $ek = $e.Key; $en = $e.Name
+    $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target $en -Action 'Remove policy exclusion (key backed up first)' -Undo 'reg import the .reg backup in C:\ccdc\backups' -ScriptBlock {
+        $null = Backup-CcdcRegistry -Key ($ek -replace '^HKLM:', 'HKLM')
+        Remove-ItemProperty -Path $ek -Name $en -ErrorAction Stop
+    }
+}
+if (-not $running -and -not $polEx) { Write-Finding -Level INFO -Category 'Exclusions' -Message 'Defender-set exclusions can only be read and removed once the service runs: run this again after it starts.' }
+elseif (-not $excl -and -not $polEx) { Write-Finding -Level GREEN -Category 'Exclusions' -Message 'No exclusions.' }
 foreach ($e in $excl) {
     Write-Finding -Level YELLOW -Category 'Exclusions' -Message ("{0}: {1}" -f ($e.Type -replace 'Exclusion', ''), $e.Value)
     $et = $e.Type; $ev = $e.Value
@@ -117,8 +157,10 @@ if ($excl) { Write-Finding -Level INFO -Category 'Exclusions' -Message 'Removed 
 # ---------------------------------------------------------------------------
 Write-Section '6. Signatures'
 # ---------------------------------------------------------------------------
-$st = Get-MpComputerStatus -ErrorAction SilentlyContinue
-if ($st -and $st.AntivirusSignatureAge -gt 3) {
+$st = if ($running) { Get-MpComputerStatus -ErrorAction SilentlyContinue } else { $null }
+if (-not $st) { Write-Finding -Level INFO -Category 'Signatures' -Message 'Unknown until Defender is running.' }
+elseif ($st.AntivirusSignatureAge -gt 3650) { Write-Finding -Level INFO -Category 'Signatures' -Message 'Age unknown (Defender just started): check again in a minute.' }
+elseif ($st.AntivirusSignatureAge -gt 3) {
     Write-Finding -Level YELLOW -Category 'Signatures' -Message "Signatures are $($st.AntivirusSignatureAge) days old."
     $null = Invoke-CcdcChange -Cmdlet $PSCmdlet -Force:$Force -Target 'Defender signatures' -Action 'Try to update (needs internet; skipping is fine)' -ScriptBlock { Update-MpSignature -ErrorAction Stop }
 } elseif ($st) { Write-Finding -Level GREEN -Category 'Signatures' -Message "Signatures are $($st.AntivirusSignatureAge) day(s) old." }
@@ -135,6 +177,7 @@ if ($ok) {
     Write-Finding -Level INFO -Category 'Verify' -Message 'Detections: Get-MpThreatDetection, or Event Viewer > Windows Defender > Operational (event 1116).'
 } else {
     Write-Finding -Level RED -Category 'Verify' -Message ("Defender is still NOT fully on (service={0}, antivirus={1}, real-time={2})." -f $st.AMServiceEnabled, $st.AntivirusEnabled, $st.RealTimeProtectionEnabled)
-    Write-Finding -Level INFO -Category 'Verify' -Message 'Common causes: a domain GPO turning it off (check gpmc.msc), a pending reboot after reinstall, or another AV. Run this again after fixing.'
+    if ((Get-Service WinDefend -ErrorAction SilentlyContinue).Status -ne 'Running') { Write-Finding -Level YELLOW -Category 'Verify' -Message 'Next: REBOOT (with the captain''s OK), then run panel 16 again. The policy that blocked it is already removed, so it should start after the reboot.' }
+    else { Write-Finding -Level INFO -Category 'Verify' -Message 'Common causes: a domain GPO turning it off (check gpmc.msc), or another AV. Run this again after fixing.' }
 }
 Complete-Ccdc

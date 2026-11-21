@@ -124,7 +124,7 @@ Every Windows attack, how to spot it, how to stop it without breaking things: [`
 | Key | Script | What it does |
 |---|---|---|
 | 10 | `harden\Rotate-Passwords.ps1` | Random passwords, shown once, never saved; scored accounts excluded |
-| 11 | `harden\Set-Firewall.ps1` | **Basic firewall:** keeps everything that is listening open, blocks other inbound, leaves outbound alone, logs drops. Safety timer reverts it if you get cut off. One-key revert any time |
+| 11 | `harden\Set-Firewall.ps1` | **Basic firewall:** keeps everything that is listening open, blocks other inbound, leaves outbound alone. Records every profile's exact settings first; **revert** removes only the toolkit's rules and sets each profile back as recorded (checked afterwards). A 3-minute safety timer runs the same revert as SYSTEM if you do not type YES. Locked out of the panel: run `C:\ccdc\firewall\revert.cmd` as admin |
 | 12 | `harden\Harden-Walkthrough.ps1` | **Hardening walkthrough:** each change shown with what it stops and its risk (SAFE / CAUTION / DANGER, with evidence from this box). Apply or skip. On a DC registry settings go into one GPO "CCDC Hardening". Undo one step or all |
 | 13 | `harden\Harden-IIS-PHP.ps1` | Back up IIS / web roots, WP `DISALLOW_FILE_EDIT`, config ACLs, WP admins / plugins |
 | 14 | `harden\Harden-MSSQL.ps1` | sa, sysadmins, weak SQL logins; turn off xp_cmdshell and friends |
