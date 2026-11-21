@@ -94,7 +94,10 @@ Get-ChildItem $Path -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 Remove-Item $zip, $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
 # Administrators (S-1-5-32-544) + SYSTEM (S-1-5-18) only. SIDs, so it works in any language.
-$null = & icacls.exe $Path /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' /T /C /Q 2>&1
+# Lock the TOP folder only, then make everything inside inherit from it.
+# (Granting (OI)(CI) with /T fails on files and leaves them with NO permissions.)
+$null = & icacls.exe $Path /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' /C /Q 2>&1
+$null = & icacls.exe "$Path\*" /reset /T /C /Q 2>&1
 
 Write-Host "[+] Toolkit installed to $Path" -ForegroundColor Green
 Write-Host "    Next time: double-click $Path\CCDC-Toolkit.bat" -ForegroundColor Gray

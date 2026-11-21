@@ -227,7 +227,10 @@ function Save-Snapshot([string]$label) {
     $dir = Join-Path $script:CcdcSnapshotRoot ("{0}_{1}" -f (Get-Date -Format 'yyyyMMdd_HHmmss'), $safe)
     New-Item -ItemType Directory -Path $dir -Force -WhatIf:$false | Out-Null
     # Snapshot folders hold configuration only, but keep normal users out anyway (SIDs: Administrators, SYSTEM).
-    $null = & icacls.exe (Split-Path $script:CcdcSnapshotRoot) /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' /T /C /Q 2>&1
+    # Top folder only; children inherit. (/T with (OI)(CI) would strip every file's permissions.)
+    $snapTop = Split-Path $script:CcdcSnapshotRoot
+    $null = & icacls.exe $snapTop /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' /C /Q 2>&1
+    $null = & icacls.exe "$snapTop\*" /reset /T /C /Q 2>&1
 
     $state = Get-State
     $state.Meta.Label = $label
