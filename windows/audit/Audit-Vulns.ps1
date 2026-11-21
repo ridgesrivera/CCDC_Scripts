@@ -350,13 +350,26 @@ foreach ($c in $checks) {
         elseif ($before.S -eq 'VULN' -and $now.S -eq 'RISK') { $change = 'improved' }
     }
     $rows += [pscustomobject]@{ Check = $c.Name; Cve = $c.Cve; Now = $now.S; Before = $(if ($before) { $before.S } else { '-' }); Change = $change; Why = $now.Why; Fix = $c.Fix }
-
-    $lvl = switch ($now.S) { 'VULN' { 'RED' } 'RISK' { 'YELLOW' } default { 'GREEN' } }
-    if ($change -like 'REGRESSED*') { $lvl = 'RED' }
-    $msg = "{0} [{1}]: {2}" -f $c.Name, $c.Cve, $now.Why
-    if ($change) { $msg += "   <- $change" }
-    Write-Finding -Level $lvl -Category $c.Id -Message $msg -Detail $(if ($now.S -ne 'OK') { "Fix: $($c.Fix)" } else { '' })
 }
+
+# ---------------------------------------------------------------------------
+# Output: open items first (worst first, each with its fix), then one line each for OK and FIXED.
+# ---------------------------------------------------------------------------
+Write-Section 'Open: fix these (worst first)'
+$open = @($rows | Where-Object { $_.Now -ne 'OK' } | Sort-Object @{ e = { if ($_.Change -like 'REGRESSED*') { 0 } elseif ($_.Now -eq 'VULN') { 1 } else { 2 } } }, Check)
+foreach ($r in $open) {
+    $lvl = if ($r.Now -eq 'VULN' -or $r.Change -like 'REGRESSED*') { 'RED' } else { 'YELLOW' }
+    $cve = if ($r.Cve -match '^(CVE|MS)') { " ($($r.Cve))" } else { '' }
+    $tag = if ($r.Change -like 'REGRESSED*') { '   <- REGRESSED: it was fixed, someone undid it' } else { '' }
+    Write-Finding -Level $lvl -Category 'Open' -Message ("{0}{1}: {2}{3}" -f $r.Check, $cve, $r.Why, $tag) -Detail "Fix: $($r.Fix)"
+}
+if (-not $open) { Write-Finding -Level GREEN -Category 'Open' -Message 'Nothing open.' }
+Write-Section 'Summary'
+$okRows = @($rows | Where-Object { $_.Now -eq 'OK' })
+if ($okRows) { Write-Finding -Level GREEN -Category 'OK' -Message ("OK ({0}): {1}" -f $okRows.Count, (($okRows | ForEach-Object { $_.Check -replace '\s*\(.*$', '' }) -join ', ')) }
+$fixed = @($rows | Where-Object { $_.Change -like 'FIXED*' })
+if ($fixed) { Write-Finding -Level GREEN -Category 'Fixed' -Message ("Fixed since the snapshot ({0}): {1}" -f $fixed.Count, (($fixed | ForEach-Object { "$($_.Check -replace '\s*\(.*$', '') [$($_.Change -replace '^FIXED ?', '')]" }) -join ', ')) }
+Write-Host ("  Open: {0} red, {1} yellow.   Most fixes: panel 12 (hardening walkthrough).   Patches: only if the rules and time allow." -f @($open | Where-Object { $_.Now -eq 'VULN' }).Count, @($open | Where-Object { $_.Now -eq 'RISK' }).Count) -ForegroundColor White
 
 # ---------------------------------------------------------------------------
 # AD CS ESC1 (live only: lives in AD, not on this box)
@@ -395,24 +408,5 @@ if ($X.AdcsInForest) {
         if ($n -eq 0) { Write-Finding -Level GREEN -Category 'ESC1' -Message 'No ESC1-shaped templates' }
     } catch { Write-Finding -Level INFO -Category 'ESC1' -Message "Could not read templates: $($_.Exception.Message)" }
 }
-
-# ---------------------------------------------------------------------------
-# Summary table
-# ---------------------------------------------------------------------------
-Write-Section 'Summary'
-$fmt = '  {0,-10} {1,-7} {2,-40} {3}'
-Write-Host ($fmt -f 'NOW', 'BEFORE', 'CHECK', 'CHANGE') -ForegroundColor White
-foreach ($r in ($rows | Sort-Object @{ e = { switch ($_.Now) { 'VULN' { 0 } 'RISK' { 1 } default { 2 } } } }, Check)) {
-    $label = switch ($r.Now) { 'VULN' { 'VULNERABLE' } 'RISK' { 'AT RISK' } default { 'OK' } }
-    $col = switch ($r.Now) { 'VULN' { 'Red' } 'RISK' { 'Yellow' } default { 'Green' } }
-    if ($r.Change -like 'REGRESSED*') { $col = 'Red' }
-    Write-Host ($fmt -f $label, $r.Before, $r.Check, $r.Change) -ForegroundColor $col
-}
-$fixed = @($rows | Where-Object { $_.Change -like 'FIXED*' })
-$regr  = @($rows | Where-Object { $_.Change -like 'REGRESSED*' })
-$open  = @($rows | Where-Object { $_.Now -ne 'OK' })
-Write-Host ''
-Write-Host ("  Open now: {0}   Fixed since snapshot: {1}   Regressed: {2}" -f $open.Count, $fixed.Count, $regr.Count) -ForegroundColor White
-if ($regr) { Write-Host '  REGRESSED items were fixed and are open again: check LIVE ALERTS / panel W for who changed them.' -ForegroundColor Red }
 
 Complete-Ccdc

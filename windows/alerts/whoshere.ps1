@@ -43,7 +43,8 @@ function Leaf($p) { $p = [string]$p; if ($p -and $p -ne '-') { [IO.Path]::GetFil
 
 $myIps = @(Get-NetIPAddress -EA 0 | ForEach-Object { $_.IPAddress -replace '%.*$', '' }) + @('127.0.0.1', '::1')
 $listen = @(Get-NetTCPConnection -State Listen -EA 0)
-$est = @(Get-NetTCPConnection -State Established -EA 0 | Where-Object { $myIps -notcontains ($_.RemoteAddress -replace '^::ffff:', '') })
+# The box talking to itself (its own IPs, link-local fe80::) is not 'someone else'.
+$est = @(Get-NetTCPConnection -State Established -EA 0 | Where-Object { $ra = ($_.RemoteAddress -replace '^::ffff:', '') -replace '%.*$', ''; $myIps -notcontains $ra -and $ra -notmatch '^fe80:' })
 $svcs = @{}; foreach ($s in (Get-CimInstance Win32_Service -EA 0)) { $svcs[$s.Name] = $s }
 $procName = @{}; foreach ($p in (Get-Process -EA 0)) { $procName[$p.Id] = $p.ProcessName }
 
@@ -108,13 +109,13 @@ foreach ($p in $bad) { Write-Host ("  [!!] {0} started by a web/SQL server proce
 $svcNew = @(Get-WinEvent -FilterHashtable @{LogName = 'System'; Id = 7045; StartTime = $since} -EA 0)
 foreach ($e in $svcNew) { Write-Host ("  [!!] service installed {0}: {1} -> {2}  (remote command tools like PsExec do this)" -f $e.TimeCreated.ToString('HH:mm'), $e.Properties[0].Value, $e.Properties[1].Value) -ForegroundColor Red }
 
-Section "Successful logons, last $Minutes min (machine accounts hidden)"
+Section "Logons from other machines, last $Minutes min (machine accounts and this box hidden)"
 $ok = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624; StartTime=$since} -EA 0 |
-      Where-Object { $_.Properties[8].Value -in 2,3,8,10 -and $_.Properties[5].Value -notlike '*$' }
+      Where-Object { $_.Properties[8].Value -in 3,8,10 -and $_.Properties[5].Value -notlike '*$' -and $myIps -notcontains [string]$_.Properties[18].Value -and $_.Properties[18].Value -ne '-' }
 if ($ok) {
-  $ok | Group-Object { '{0,-16} {1,-12} from {2,-15} via {3}' -f $_.Properties[5].Value, @{2='keyboard'; 3='network'; 8='cleartext'; 10='RDP'}[[int]$_.Properties[8].Value], $_.Properties[18].Value, (Leaf $_.Properties[17].Value) } |
-    Sort-Object Count -Descending | Select-Object -First 25 Count, @{n='User / how / from / process'; e={$_.Name}} | Format-Table -AutoSize -Wrap
-  Note "network = SMB, WinRM, WMI, LDAP, SQL with Windows auth. cleartext = a password sent in plain text (IIS basic auth, FTP). From '-' = a local process."
+  $ok | Group-Object { '{0,-16} {1,-10} from {2}' -f $_.Properties[5].Value, @{3='network'; 8='cleartext'; 10='RDP'}[[int]$_.Properties[8].Value], $_.Properties[18].Value } |
+    Sort-Object Count -Descending | Select-Object -First 20 Count, @{n='User / how / from'; e={$_.Name}} | Format-Table -AutoSize
+  Note 'network = SMB, WinRM, WMI, LDAP. cleartext = password sent in plain text (IIS basic auth, FTP). Unknown user or IP? panel E.'
 } else { Note 'none' }
 $sshLog = @(Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 200 -EA 0 | Where-Object { $_.TimeCreated -ge $since -and $_.Message -match 'Accepted|Failed' })
 if ($sshLog) {

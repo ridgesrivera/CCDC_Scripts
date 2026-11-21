@@ -113,11 +113,13 @@ $keys = @(
     'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server',
     'HKLM\SOFTWARE\Policies'
 )
+$regOk = 0
 foreach ($k in $keys) {
     $file = Join-Path $reg (($k -replace '[\\ ]', '_') + '.reg')
     $null = & reg.exe export $k $file /y 2>&1
-    if ($LASTEXITCODE -eq 0) { Write-Finding -Level GREEN -Category 'Registry' -Message $k } else { Write-Finding -Level INFO -Category 'Registry' -Message "$k (not present)" }
+    if ($LASTEXITCODE -eq 0) { $regOk++; Write-CcdcLog "BACKUP registry $k" } else { Write-CcdcLog "BACKUP registry $k not present" }
 }
+Write-Finding -Level GREEN -Category 'Registry' -Message ("{0} registry areas exported (Run keys, Winlogon, IFEO, services, LSA, RDP, policies)" -f $regOk)
 
 # ---------------------------------------------------------------------------
 Write-Section 'Scheduled tasks + firewall'

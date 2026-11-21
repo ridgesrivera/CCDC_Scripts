@@ -39,7 +39,7 @@ param([string]$ConfigPath)
 
 $here = $PSScriptRoot
 . "$here\lib\CCDC-Common.ps1"
-$ToolkitVersion = '3.1'
+$ToolkitVersion = '3.2'
 $BtDir = 'C:\bt'
 $ReportDir = 'C:\ccdc\reports'
 
@@ -196,7 +196,7 @@ function Show-Menu {
     Write-Host '  START  ' -NoNewline -ForegroundColor White
     Write-Host '[0] ' -NoNewline -ForegroundColor Yellow
     Write-Host 'First 15 minutes (guided, zero)' -NoNewline -ForegroundColor Cyan
-    Write-Host '  overview, backup, alerts, audits, baselines' -ForegroundColor DarkGray
+    Write-Host '  snapshot, backup, alerts, who is on, users, vulns' -ForegroundColor DarkGray
     foreach ($sec in $sections) {
         Write-Host ''
         Write-Host ("  {0}" -f $sec.Title) -ForegroundColor $sec.Color
@@ -277,11 +277,13 @@ function Get-ScriptParams([string]$key) {
 # LIVE ALERTS submenu. The bundle is standalone (paste-deployable) so it is
 # installed to C:\bt and run from there, not from the repo folder.
 # ---------------------------------------------------------------------------
-function Install-LiveAlerts {
+function Install-LiveAlerts([switch]$Quiet) {
     $src = Join-Path $here 'alerts'
     New-Item $BtDir -ItemType Directory -Force | Out-Null
     foreach ($f in 'bt-alerts.ps1', 'bt-selftest.ps1', 'whoshere.ps1', 'pii-hunt.ps1') { Copy-Item (Join-Path $src $f) (Join-Path $BtDir $f) -Force }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $BtDir 'bt-alerts.ps1') -Install
+    $alertArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $BtDir 'bt-alerts.ps1'), '-Install')
+    if ($Quiet) { $alertArgs += '-NoBackfill' }   # first 15: the users audit covers the same ground
+    & powershell.exe @alertArgs
 }
 function Invoke-LiveAlerts {
     $bt = Join-Path $BtDir 'bt-alerts.ps1'
@@ -497,7 +499,7 @@ function Invoke-FirstSteps {
     $steps = @(
         @{ T = 'Snapshot: record how the box is before anyone changes it';        Do = { & (Join-Path $here 'backup\Snapshot-State.ps1') -Mode Take -Label 'first15' @cp } }
         @{ T = "Backup ($role)";                                                   Do = { & (Join-Path $here 'backup\Backup-Box.ps1') @cp } }
-        @{ T = 'LIVE ALERTS on (opens the watch window; keep it open)';            Do = { Install-LiveAlerts } }
+        @{ T = 'LIVE ALERTS on (opens the watch window; keep it open)';            Do = { Install-LiveAlerts -Quiet } }
         @{ T = 'Who is on this box: every way in, who is connected now';           Do = { & (Join-Path $here 'alerts\whoshere.ps1') } }
         @{ T = 'Users & admins: who has admin, risky accounts';                    Do = { & (Join-Path $here 'audit\Audit-Users.ps1') @cp -OutFile (Join-Path $dir 'users.txt') } }
         @{ T = 'Vulnerability check: what Red Team can walk straight into';        Do = { & (Join-Path $here 'audit\Audit-Vulns.ps1') @cp -OutFile (Join-Path $dir 'vulns.txt') } }

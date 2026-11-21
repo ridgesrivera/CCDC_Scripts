@@ -34,7 +34,7 @@
                      audit policy: harmless to leave on
 
     COMMANDS (Admin PowerShell, from C:\bt)
-      .\bt-alerts.ps1 -Install            alerts on + 24 h backfill + opens the watch window
+      .\bt-alerts.ps1 -Install            alerts on + 24 h backfill + opens the watch window (-NoBackfill: skip the report)
       .\bt-alerts.ps1 -Watch              reopen the watch window (one per box)
       .\bt-alerts.ps1 -Trust 10.1.2.3     stop network-logon alerts from an IP (scorer / teammate)
       .\bt-alerts.ps1 -Block 10.66.6.6    firewall an attacker IP (in + out; refuses trusted IPs)
@@ -56,7 +56,7 @@
 .EXAMPLE
     .\bt-alerts.ps1 -Chain 10.66.6.6 -Hours 6
 #>
-param([switch]$Install, [switch]$Remove, [switch]$Test, [switch]$Watch, [switch]$Backfill,
+param([switch]$Install, [switch]$Remove, [switch]$Test, [switch]$Watch, [switch]$Backfill, [switch]$NoBackfill,
       [string]$Block, [string]$Trust, [string]$Chain, [int]$Snooze = 0, [int]$Hours = 24,
       [string]$Key = '', [string]$Log = 'Security')
 
@@ -438,7 +438,7 @@ if ($Install) {
 
   Get-ScheduledTask -TaskName 'BT-Alert-*' -EA 0 | Unregister-ScheduledTask -Confirm:$false
   $cls = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler
-  $installed = 0
+  $installed = 0; $okNames = @()
   foreach ($k in $Triggers.Keys) {
     $logName, $xpath, $noisy = $Triggers[$k]
     if (-not (Get-WinEvent -ListLog $logName -EA 0)) { Write-Host "[skip] $k (no '$logName' log on this box)" -ForegroundColor DarkGray; continue }
@@ -446,11 +446,12 @@ if ($Install) {
     $t.Subscription = "<QueryList><Query Id='0' Path='$logName'><Select Path='$logName'>$xpath</Select></Query></QueryList>"
     $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-w hidden -nop -ep bypass -File $Self -Key $k -Log `"$logName`""
     $set = New-ScheduledTaskSettingsSet -MultipleInstances $(if ($noisy) { 'IgnoreNew' } else { 'Queue' }) -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    try { Register-ScheduledTask -TaskName "BT-Alert-$k" -Action $a -Trigger $t -Settings $set -User 'SYSTEM' -RunLevel Highest -Force -EA Stop | Out-Null; Write-Host "[ok] $k" -ForegroundColor Green; $installed++ }
+    try { Register-ScheduledTask -TaskName "BT-Alert-$k" -Action $a -Trigger $t -Settings $set -User 'SYSTEM' -RunLevel Highest -Force -EA Stop | Out-Null; $okNames += $k; $installed++ }
     catch { Write-Host "[!!] $k : $($_.Exception.Message)" -ForegroundColor Red }
   }
+  Write-Host ("Armed {0} detections: {1}" -f $installed, ($okNames -join ', ')) -ForegroundColor Green
   $st = Get-State; $st['expected'] = $installed; Save-State $st
-  Show-Backfill $Hours
+  if (-not $NoBackfill) { Show-Backfill $Hours } else { Write-Host 'What already happened (last 24 h): panel D -> 7, or .\bt-alerts.ps1 -Backfill' -ForegroundColor DarkGray }
   $interactive = [Environment]::UserInteractive -and $host.Name -eq 'ConsoleHost' -and -not $env:SSH_CLIENT -and -not $PSSenderInfo
   if ($interactive) {
     # close any older watch window first (one per box; an old one would also flag the new script as 'edited')
