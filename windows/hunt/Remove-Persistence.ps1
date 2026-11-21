@@ -31,7 +31,7 @@
       Port proxies (netsh portproxy)         delete the forward
 
     WHAT IT DOES NOT DO
-      Rogue ACCOUNTS: use harden\Disable-Accounts.ps1.   Firewall: harden\Set-Firewall.ps1.
+      Rogue ACCOUNTS: use hunt\Kick-Block.ps1 (panel X).   Firewall: harden\Set-Firewall.ps1.
       It never deletes a file under C:\Windows (a task that runs cmd.exe is
       removed; cmd.exe is not). It refuses to stop a service that is listening
       on a scored port unless you pass -AllowScored.
@@ -756,7 +756,7 @@ foreach ($c in $list) {
     Write-CcdcLog ("CANDIDATE {0} {1} {2} | {3}" -f $c.Level, $c.Type, $c.Name, $c.Detail)
 }
 if ($hiddenYellow -gt 0) { Write-Host ("`n  (+{0} lower-confidence item(s) hidden: -MinLevel YELLOW shows them)" -f $hiddenYellow) -ForegroundColor DarkGray }
-Write-Host '  Accounts are not listed here: use harden\Disable-Accounts.ps1.' -ForegroundColor DarkGray
+Write-Host '  Accounts are not listed here: use panel X (Kick-Block).' -ForegroundColor DarkGray
 
 # Which ones? Direct targets, -All and -WhatIf need no prompt.
 $selected = @()

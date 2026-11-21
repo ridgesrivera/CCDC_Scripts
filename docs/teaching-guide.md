@@ -47,7 +47,7 @@ Before a session, plant a few things for students to find (see "Plant list" at t
 - **Discuss:** Why doesn't "default inbound = Block" break the DC? What does `-DisableOtherInboundRules` change?
 
 ## Session 6: Hardening, logging, watch loop (45 min)
-- `[13]` Harden-Baseline module by module: what attack does each one stop? (Responder → LLMNR/NBT-NS, mimikatz → WDigest/LSA protection, PrintNightmare → spooler)
+- `[12]` Hardening walkthrough step by step: read each Why and Risk out loud. What attack does each one stop? (Responder → LLMNR/NBT-NS, mimikatz → WDigest/LSA protection, PrintNightmare → spooler)
 - `[L]` Setup-Logging, then generate events (failed logon, new user) and find them in Event Viewer / Graylog.
 - `[W]` → `[5]` change baseline, add a user, `[W]` → `[3]` diff.
 - `[S]` snapshot, turn on WDigest by hand, `[W]` → `[1]` shows it as NOT BY THE TOOLKIT, `[5]` shows WDigest as REGRESSED, `[U]` puts it back.

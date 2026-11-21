@@ -48,51 +48,46 @@ $ReportDir = 'C:\ccdc\reports'
 # ---------------------------------------------------------------------------
 $menu = @(
     # MONITOR
-    @{ Key = 'D';  Sec = 'MON'; Name = 'LIVE ALERTS';           File = 'alerts\bt-alerts.ps1';            RO = $false; Desc = 'Instant popup when Red Team acts: who, from which IP, how they got in, what that IP did before, and the undo commands. Install, watch, trust/block an IP, story of an IP, self-test.' }
-    @{ Key = 'C';  Sec = 'MON'; Name = 'Service health';        File = 'hunt\Test-ScoredServices.ps1';    RO = $true;  Desc = 'Listener -> service -> firewall -> real answer for each service port, and WHY it is down. Loop mode beeps on a change.' }
-    @{ Key = 'N';  Sec = 'MON'; Name = 'Who is on this box';    File = 'alerts\whoshere.ps1';             RO = $true;  Desc = 'One screen: sessions, remote connections, recent logons, new users/tasks/services, diff vs baseline.' }
+    @{ Key = 'D';  Sec = 'MON'; Name = 'LIVE ALERTS';           File = 'alerts\bt-alerts.ps1';            RO = $false; Desc = 'Instant popup when Red Team acts: who, from which IP, how they got in, what that IP did before. Install, watch, trust/block an IP, story of an IP, self-test.' }
+    @{ Key = 'N';  Sec = 'MON'; Name = 'Who is on this box';    File = 'alerts\whoshere.ps1';             RO = $true;  Desc = 'Every way in (RDP, SSH, SMB, WinRM, WMI, VNC, Telnet, FTP, web, SQL): is it on, and who is connected right now from where.' }
+    # RED TEAM RESPONSE
+    @{ Key = 'E';  Sec = 'RES'; Name = 'Find attacks (what to do)'; File = 'hunt\Find-Attacks.ps1';       RO = $true;  Desc = 'Reads the logs and names the attack: password guessing on any service, Kerberoasting, AS-REP roasting, DCSync, new admin, PsExec, web shell, credential dumping... with step-by-step response.' }
+    @{ Key = 'X';  Sec = 'RES'; Name = 'Kick user / block IP';  File = 'hunt\Kick-Block.ps1';             RO = $false; Desc = 'Log a user off everywhere + disable the account, and/or block an IP in + out. Every action can be undone.' }
+    @{ Key = 'R';  Sec = 'RES'; Name = 'Remove persistence';    File = 'hunt\Remove-Persistence.ps1';     RO = $false; Desc = 'Numbered list of tasks, services, Run keys, web shells...: keeps evidence, then disables / quarantines what you pick.' }
+    @{ Key = 'I';  Sec = 'RES'; Name = 'Incident worksheet';    File = 'hunt\New-IncidentReport.ps1';     RO = $true;  Desc = 'Candidate attacker IPs + timeline + what was removed: the facts for an incident report.' }
     # SNAPSHOT & ROLLBACK
     @{ Key = 'S';  Sec = 'SNP'; Name = 'Take snapshot';         File = 'backup\Snapshot-State.ps1';       RO = $true;  Desc = 'Save the security state now: registry security settings, services, users, admin groups, shares, hosts, Defender, firewall, audit + security policy. The first one is the ORIGINAL.' }
     @{ Key = 'W';  Sec = 'SNP'; Name = 'What changed?';         File = 'backup\Snapshot-State.ps1';       RO = $true;  Desc = 'Every setting that changed since a snapshot, marked [toolkit] or NOT BY THE TOOLKIT; plus new users/tasks/services/keys since the change baseline.' }
     @{ Key = 'U';  Sec = 'SNP'; Name = 'Undo changes';          File = 'backup\Snapshot-State.ps1';       RO = $false; Desc = 'Something broke? Pick a snapshot, pick the changes, put them back (each confirmed, backed up, and undoable).' }
     # AUDIT
     @{ Key = '1';  Sec = 'AUD'; Name = 'Box overview';          File = 'recon\Get-BoxOverview.ps1';       RO = $true;  Desc = 'OS, role, IPs, listeners -> process, roles, installed services, patches.' }
-    @{ Key = '2';  Sec = 'AUD'; Name = 'Users & admins';        File = 'audit\Audit-Users.ps1';           RO = $true;  Desc = 'Admin groups, roastable accounts, passwords in descriptions, new accounts.' }
+    @{ Key = '2';  Sec = 'AUD'; Name = 'Users & admins';        File = 'audit\Audit-Users.ps1';           RO = $true;  Desc = 'Who is in admin groups, roastable accounts, passwords in descriptions, accounts created after setup. Grouped, one line per problem.' }
     @{ Key = '3';  Sec = 'AUD'; Name = 'Persistence hunt';      File = 'audit\Audit-Persistence.ps1';     RO = $true;  Desc = 'Tasks, services, Run keys, WMI, IFEO/sticky keys, SSH keys, web shells.' }
     @{ Key = '4';  Sec = 'AUD'; Name = 'Network exposure';      File = 'audit\Audit-Network.ps1';         RO = $true;  Desc = 'Connections, firewall, SMBv1/signing, shares, RDP NLA, WinRM.' }
-    @{ Key = '5';  Sec = 'AUD'; Name = 'Vulns (CVE check)';     File = 'audit\Audit-Vulns.ps1';           RO = $true;  Desc = 'Zerologon, PrintNightmare, EternalBlue, noPac, PetitPotam, Certifried, SIGRed, HiveNightmare, IPv6 RCE, SMB reflection, relay, cleartext creds... NOW vs ORIGINAL snapshot: what you fixed, what regressed.' }
+    @{ Key = '5';  Sec = 'AUD'; Name = 'Vulns (CVE check)';     File = 'audit\Audit-Vulns.ps1';           RO = $true;  Desc = 'Zerologon, PrintNightmare, EternalBlue, noPac, PetitPotam, Certifried, SIGRed, HiveNightmare, relay, cleartext creds... NOW vs ORIGINAL snapshot: what you fixed, what regressed.' }
     @{ Key = '6';  Sec = 'AUD'; Name = 'AD + GPO (DC)';         File = 'audit\Audit-AD-GPO.ps1';          RO = $true;  Desc = 'GPO changes, DCSync rights, root ACL, delegation, krbtgt age.' }
-    @{ Key = '7';  Sec = 'AUD'; Name = 'Security policy';       File = 'audit\Audit-SecurityPolicy.ps1';  RO = $true;  Desc = 'GPO/AD/DNS settings safe to turn on, with the GPO path and check/fix commands.' }
-    @{ Key = '8';  Sec = 'AUD'; Name = 'PII / sensitive files'; File = 'audit\Audit-SensitiveFiles.ps1';  RO = $true;  Desc = 'SSNs, card numbers, passwords, keys in files (and SQL Server) + who can read them.' }
-    @{ Key = '9';  Sec = 'AUD'; Name = 'Software audit';        File = 'audit\Audit-Software.ps1';        RO = $true;  Desc = 'Remote-access tools, attack tools, junk -> inventory CSV for injects.' }
-    @{ Key = 'E';  Sec = 'AUD'; Name = 'Event-log sweep';       File = 'hunt\Watch-Events.ps1';           RO = $true;  Desc = 'Look back N minutes: new users, tasks, services, logons, tampering, DCSync, roasting, each with source IP.' }
-    @{ Key = 'T';  Sec = 'AUD'; Name = 'Vendor tool audits';    File = 'audit\Invoke-AuditTools.ps1';     RO = $true;  Desc = 'Autoruns, Sigcheck, AccessChk, Hayabusa, PingCastle, Locksmith (stage with tools\Get-CcdcTools.ps1).' }
+    @{ Key = '7';  Sec = 'AUD'; Name = 'PII / sensitive files'; File = 'audit\Audit-SensitiveFiles.ps1';  RO = $true;  Desc = 'SSNs, card numbers, passwords, keys in files (and SQL Server) + who can read them.' }
+    @{ Key = '8';  Sec = 'AUD'; Name = 'C2 beacon scan';        File = 'hunt\Find-Beacons.ps1';           RO = $true;  Desc = 'Watches outbound connections for a minute: implants calling home, odd processes talking out, C2 pipes, DNS tunnelling.' }
     # HARDEN
     @{ Key = '10'; Sec = 'HAR'; Name = 'Rotate passwords';      File = 'harden\Rotate-Passwords.ps1';     RO = $false; Desc = 'Random passwords, shown once, never saved. Scored accounts excluded (they need a Password Change Request).' }
-    @{ Key = '11'; Sec = 'HAR'; Name = 'Disable accounts';      File = 'harden\Disable-Accounts.ps1';     RO = $false; Desc = 'Disable (not delete) rogue accounts, with a rollback file.' }
-    @{ Key = '12'; Sec = 'HAR'; Name = 'Firewall allowlist';    File = 'harden\Set-Firewall.ps1';         RO = $false; Desc = 'Default-deny inbound, scored ports open to any source, keeps your session, auto-rollback in 5 min.' }
-    @{ Key = '13'; Sec = 'HAR'; Name = 'Baseline hardening';    File = 'harden\Harden-Baseline.ps1';      RO = $false; Desc = 'SMBv1, signing, LLMNR/NBT-NS, WDigest, LSA, spooler on DC, auditing, IFEO (each skippable).' }
-    @{ Key = '14'; Sec = 'HAR'; Name = 'IIS / PHP hardening';   File = 'harden\Harden-IIS-PHP.ps1';       RO = $false; Desc = 'Back up web roots, WP DISALLOW_FILE_EDIT, config perms, WP admins/plugins.' }
-    @{ Key = '15'; Sec = 'HAR'; Name = 'AD account hardening';  File = 'harden\Harden-AD.ps1';            RO = $false; Desc = 'DC: Kerberos pre-auth, reversible encryption, blank-password flag; lists roastable accounts.' }
-    @{ Key = '16'; Sec = 'HAR'; Name = 'SQL Server hardening';  File = 'harden\Harden-MSSQL.ps1';         RO = $false; Desc = 'Audit sa / sysadmins / weak logins, turn off xp_cmdshell and friends.' }
-    @{ Key = '17'; Sec = 'HAR'; Name = 'Reset krbtgt (DC)';     File = 'harden\Reset-Krbtgt.ps1';         RO = $false; Desc = 'DC: kill golden tickets after a domain compromise (run twice, with a pause).' }
-    # RESPOND
-    @{ Key = 'R';  Sec = 'RES'; Name = 'Remove persistence';    File = 'hunt\Remove-Persistence.ps1';     RO = $false; Desc = 'Numbered list: preserve evidence first, then disable / quarantine what you pick.' }
-    @{ Key = 'X';  Sec = 'RES'; Name = 'Log off sessions';      File = 'harden\Disconnect-Sessions.ps1';  RO = $false; Desc = 'List / log off RDP, SMB, WinRM, SSH sessions (do it right after a password change).' }
-    @{ Key = 'I';  Sec = 'RES'; Name = 'Incident worksheet';    File = 'hunt\New-IncidentReport.ps1';     RO = $true;  Desc = 'Candidate attacker IPs + timeline + what was removed: facts for the incident report ticket.' }
+    @{ Key = '11'; Sec = 'HAR'; Name = 'Firewall (basic)';      File = 'harden\Set-Firewall.ps1';         RO = $false; Desc = 'Step by step: keep everything that is listening open, block other inbound, safety timer, one-key revert.' }
+    @{ Key = '12'; Sec = 'HAR'; Name = 'Hardening walkthrough'; File = 'harden\Harden-Walkthrough.ps1';   RO = $false; Desc = 'Step by step: each change explained (what it stops, SAFE/CAUTION/DANGER). On a DC it goes into one GPO. Undo any step.' }
+    @{ Key = '13'; Sec = 'HAR'; Name = 'IIS / PHP hardening';   File = 'harden\Harden-IIS-PHP.ps1';       RO = $false; Desc = 'Back up web roots, WP DISALLOW_FILE_EDIT, config perms, WP admins/plugins.' }
+    @{ Key = '14'; Sec = 'HAR'; Name = 'SQL Server hardening';  File = 'harden\Harden-MSSQL.ps1';         RO = $false; Desc = 'Audit sa / sysadmins / weak logins, turn off xp_cmdshell and friends.' }
+    @{ Key = '15'; Sec = 'HAR'; Name = 'Reset krbtgt (DC)';     File = 'harden\Reset-Krbtgt.ps1';         RO = $false; Desc = 'DC, after a domain compromise (DCSync, ntds.dit stolen): kills golden tickets. Run twice, with a pause.' }
     # BACKUP / LOGGING
-    @{ Key = 'B';  Sec = 'BAK'; Name = 'Backup this box';       File = 'backup\Backup-Box.ps1';           RO = $false; Desc = 'Registry, tasks, firewall, AD/GPO/DNS (DC), IIS -> C:\ccdc\backups.' }
-    @{ Key = 'K';  Sec = 'BAK'; Name = 'Per-service backup';    File = 'services\Invoke-AllServices.ps1'; RO = $false; Desc = 'Detect every service (DNS, IIS, SQL, SMB, FTP, VNC...), back up / info / verify / restore each.' }
+    @{ Key = 'B';  Sec = 'BAK'; Name = 'Backup this box';       File = 'backup\Backup-Box.ps1';           RO = $false; Desc = 'Registry, tasks, firewall; on a DC also GPOs, DNS zones, AD objects; with IIS also IIS config + web roots -> C:\ccdc\backups.' }
+    @{ Key = 'P';  Sec = 'BAK'; Name = 'Per-service backup';    File = 'services\Invoke-AllServices.ps1'; RO = $false; Desc = 'Detect every service (DNS, IIS, SQL, SMB, FTP, VNC...), back up / verify / restore one service.' }
     @{ Key = 'L';  Sec = 'BAK'; Name = 'Setup logging';         File = 'logging\Setup-Logging.ps1';       RO = $false; Desc = 'Audit policy, PowerShell logging, Sysmon (if staged), forward to a syslog/Graylog server.' }
 )
 # Changing scripts that do NOT get an automatic snapshot first (they do not change settings, or handle it themselves).
-$noAutoSnapshot = @('D', 'U', 'X', 'B', 'K')
+$noAutoSnapshot = @('D', 'U', 'X', 'B', 'P')
 $sections = @(
-    @{ Id = 'MON'; Title = 'MONITOR   keep these running in their own windows'; Color = 'Red' }
+    @{ Id = 'MON'; Title = 'MONITOR   keep LIVE ALERTS open in its own window';  Color = 'Red' }
+    @{ Id = 'RES'; Title = 'RED TEAM RESPONSE   something is happening';         Color = 'Magenta' }
     @{ Id = 'SNP'; Title = 'SNAPSHOT  what changed, and put it back';           Color = 'Cyan' }
     @{ Id = 'AUD'; Title = 'AUDIT     read-only, safe any time';                Color = 'Green' }
-    @{ Id = 'HAR'; Title = 'HARDEN    dry run first, you confirm each change';  Color = 'Yellow' }
-    @{ Id = 'RES'; Title = 'RESPOND   an alert fired, now what';                Color = 'Magenta' }
+    @{ Id = 'HAR'; Title = 'HARDEN    step by step, every change reversible';   Color = 'Yellow' }
     @{ Id = 'BAK'; Title = 'BACKUP & LOGGING';                                   Color = 'DarkCyan' }
 )
 
@@ -213,7 +208,7 @@ function Show-Menu {
         if ($sec.Id -eq 'AUD') {
             Write-Host '   [A]  ' -NoNewline -ForegroundColor Yellow
             Write-Host 'Run ALL quick audits' -NoNewline -ForegroundColor Cyan
-            Write-Host ' (1-7) -> one report folder' -ForegroundColor DarkGray
+            Write-Host ' (1-6) -> one report folder' -ForegroundColor DarkGray
         }
     }
     Write-Host ''
@@ -249,43 +244,17 @@ function Get-ScriptParams([string]$key) {
             if ($ex) { $p.Exclude = $ex }
             if (Read-YesNo 'Prompt for ONE password instead of generating random ones?' $false) { $p.Prompt = $true }
         }
-        '11' {
-            $p.Users = Read-List 'Accounts to DISABLE (comma separated)'
-            if (-not $p.Users) { return $null }
-            $scope = Read-Host '  Scope: [L]ocal or [D]omain (Enter = auto)'
-            if ($scope -match '^l') { $p.Scope = 'Local' } elseif ($scope -match '^d') { $p.Scope = 'Domain' }
-        }
-        '12' {
-            $listen = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -notmatch '^(127\.|::1)' -and [int]$_.LocalPort -lt 49152 } | ForEach-Object { [int]$_.LocalPort } | Sort-Object -Unique)
-            if ($listen) { Write-Host ("  Listening now (TCP): {0}" -f ($listen -join ', ')) -ForegroundColor DarkGray }
-            $tcp = Read-List 'TCP ports to allow (Enter = scored ports from config)'
-            if ($tcp) { $p.AllowTcp = [int[]]$tcp }
-            $udp = Read-List 'UDP ports to allow (Enter = from config / none; e.g. 53,123,161)'
-            if ($udp) { $p.AllowUdp = [int[]]$udp }
-            $adm = Read-List 'Admin source CIDRs for RDP/WinRM (Enter = config adminSources / this subnet + your live session)'
-            if ($adm) { $p.AdminSources = $adm }
-            if (Read-YesNo 'ALSO disable all other inbound allow rules (true allowlist)?' $false) { $p.DisableOtherInboundRules = $true }
-        }
-        'T' {
-            if (Read-YesNo 'Also run winPEAS? (Defender may quarantine it; output can contain credentials)' $false) { $p.IncludeWinPEAS = $true }
-        }
-        '13' {
-            $skip = Read-List 'Modules to SKIP (Enter = none; e.g. EnableLSAProtection,RequireSMBSigning)'
-            if ($skip) { $p.Skip = $skip }
-        }
         'N' {
             if (Read-YesNo 'Save this as the BASELINE (do it early, while the box is clean)?' $false) { $p.SaveBaseline = $true }
             $mins = Read-Host '  Minutes of logon history (Enter = 60)'; if ($mins -match '^\d+$') { $p.Minutes = [int]$mins }
         }
         'E' {
-            $lb = Read-Host '  Minutes to look back (Enter = 60)'
-            if ($lb -match '^\d+$') { $p.LookbackMinutes = [int]$lb }
+            $lb = Read-Host '  Hours of logs to check for attacks (Enter = 24)'
+            if ($lb -match '^\d+$') { $p.Hours = [int]$lb }
         }
-        'C' {
-            $m = Read-Host '  [1] check once  [2] LOOP every 60 s (new window)  [3] check once and SAVE BASELINE (scoreboard must be green)'
-            switch ($m) { '2' { $p.Loop = $true; $p.Beep = $true } '3' { $p.SaveBaseline = $true } }
-            $tcp = Read-List 'TCP ports (Enter = config, else what is listening now)'
-            if ($tcp) { $p.Tcp = [int[]]$tcp }
+        '8' {
+            $sec = Read-Host '  Seconds to watch connections (Enter = 60; slow beacons: 300)'
+            if ($sec -match '^\d+$') { $p.Seconds = [int]$sec }
         }
         'I' {
             $t = Read-Host '  Short title (e.g. rogue admin account)'; if ($t) { $p.Title = $t }
@@ -297,11 +266,7 @@ function Get-ScriptParams([string]$key) {
             if (Read-YesNo 'Also list lower-confidence (YELLOW) items?' $false) { $p.MinLevel = 'YELLOW' }
             if (Read-YesNo 'DELETE tasks/services instead of disabling them?' $false) { $p.Delete = $true }
         }
-        'X' {
-            $u = Read-List 'Users to log off (Enter = just list sessions; type ALL for everyone but you)'
-            if ($u -and $u[0] -ieq 'ALL') { $p.AllOthers = $true } elseif ($u) { $p.User = $u }
-        }
-        '16' {
+        '14' {
             $su = Read-Host '  SQL login to connect with (Enter = Windows authentication)'; if ($su) { $p.SqlUser = $su }
         }
     }
@@ -357,12 +322,12 @@ function Invoke-Entry($m) {
     Write-Host ("  {0}: " -f $m.Name) -NoNewline -ForegroundColor Cyan
     Write-Host $m.Desc -ForegroundColor DarkGray
     if ($m.Key -eq 'D') { Invoke-LiveAlerts; return }
-    if ($m.Key -eq '8') {
+    if ($m.Key -eq '7') {
         $a = Read-Host '  [1] deep file scan + who can read it  [2] quick PII hunt incl. SQL Server databases'
         if ($a -eq '2') { & $path.Replace('audit\Audit-SensitiveFiles.ps1', 'alerts\pii-hunt.ps1'); return }
         if ($a -ne '1') { Write-Host '  Cancelled.' -ForegroundColor DarkGray; return }
     }
-    if ($m.Key -eq 'K') {
+    if ($m.Key -eq 'P') {
         # services\*.ps1 have their own -Action switch (no -WhatIf / -ConfigPath), so ask directly.
         $a = Read-Host '  [1] detect what is installed  [2] back up everything present  [3] full info write-up  [4] verify backups  [5] restore (pick)'
         $act = switch ($a) { '1' { 'Detect' } '2' { 'Backup' } '3' { 'Info' } '4' { 'Verify' } '5' { 'Restore' } default { $null } }
@@ -385,10 +350,12 @@ function Invoke-Entry($m) {
         return
     }
     if ($m.Key -in 'S', 'W', 'U') { Invoke-Snapshot $m.Key; return }
+    if ($m.Key -eq 'X') { Invoke-KickMenu $path; return }
+    if ($m.Key -eq '11') { Invoke-FirewallMenu $path; return }
+    if ($m.Key -eq '12') { Invoke-WalkthroughMenu $path; return }
     $params = Get-ScriptParams $m.Key
     if ($null -eq $params) { Write-Host '  Cancelled.' -ForegroundColor DarkGray; return }
     if ($m.Key -eq 'N') { $params.Remove('ConfigPath') }   # standalone bundle script, no config
-    if ($m.Key -eq 'X' -and -not $params.User -and -not $params.AllOthers) { & $path @params; return }   # nobody named: just list
 
     # Loops go to their own window so the panel stays free.
     if ($params.Loop) {
@@ -401,7 +368,7 @@ function Invoke-Entry($m) {
         return
     }
     if ($m.RO) {
-        if ($m.Key -notin 'C', 'I', 'N', 'E' -and (Read-YesNo "Save a report to $ReportDir?" $true)) {
+        if ($m.Key -notin 'I', 'N' -and (Read-YesNo "Save a report to $ReportDir?" $true)) {
             $params.OutFile = Get-ReportPath $m.File
         }
         & $path @params
@@ -475,20 +442,65 @@ function Invoke-Snapshot([string]$key) {
 # ---------------------------------------------------------------------------
 # [0] Guided first 15 minutes. Only safe steps; each one can be skipped.
 # ---------------------------------------------------------------------------
+function Invoke-KickMenu([string]$path) {
+    & $path -List | Out-Host
+    Write-Host ''
+    Write-Host '   [1] Kick a user: log off everywhere + disable the account'
+    Write-Host '   [2] Block an IP: firewall in + out, close its sessions, show who logged on from it'
+    Write-Host '   [3] Both: kick a user AND block an IP'
+    Write-Host '   [4] Undo: unblock an IP / re-enable an account'
+    $a = Read-Host '  Choice'
+    $p = @{}; if ($ConfigPath) { $p.ConfigPath = $ConfigPath }
+    if ($a -in '1', '3') { $u = Read-List 'User name(s) to kick (comma separated)'; if ($u) { $p.User = $u; $p.DisableAccount = (Read-YesNo 'Also DISABLE the account(s) so they cannot log back in?' $true) } }
+    if ($a -in '2', '3') { $ip = Read-List 'IP address(es) to block'; if ($ip) { $p.BlockIp = $ip } }
+    if ($a -eq '4') {
+        $ip = Read-List 'IP(s) to UNBLOCK (Enter = none)'; if ($ip) { $p.Unblock = $ip }
+        $u = Read-List 'Account(s) to RE-ENABLE (Enter = none)'; if ($u) { $p.Enable = $u }
+    }
+    if ($p.Count -le 1 -and -not ($p.User -or $p.BlockIp -or $p.Unblock -or $p.Enable)) { Write-Host '  Nothing chosen.' -ForegroundColor DarkGray; return }
+    & $path @p
+}
+function Invoke-FirewallMenu([string]$path) {
+    Write-Host '   [1] Turn on the basic firewall (step by step, safety timer)'
+    Write-Host '   [2] REVERT: put the firewall back exactly as it was'
+    Write-Host '   [3] Status'
+    switch (Read-Host '  Choice') {
+        '1' { Save-AutoSnapshot 'before-Set-Firewall'; & $path }
+        '2' { & $path -Revert }
+        '3' { & $path -Status }
+        default { Write-Host '  Cancelled.' -ForegroundColor DarkGray }
+    }
+}
+function Invoke-WalkthroughMenu([string]$path) {
+    Write-Host '   [1] Walk through the hardening steps (explained, apply or skip each)'
+    Write-Host '   [2] Show what has been changed'
+    Write-Host '   [3] UNDO: one step or everything'
+    switch (Read-Host '  Choice') {
+        '1' { Save-AutoSnapshot 'before-Harden-Walkthrough'; & $path -Mode Walk }
+        '2' { & $path -Mode List }
+        '3' {
+            & $path -Mode List
+            $st = Read-List 'Step id(s) to undo (Enter = ALL, newest first)'
+            if ($st) { & $path -Mode Undo -Step $st } else { & $path -Mode Undo }
+        }
+        default { Write-Host '  Cancelled.' -ForegroundColor DarkGray }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# [0] First 15 minutes: ONLY what belongs at the very start. Each step asks.
+# ---------------------------------------------------------------------------
 function Invoke-FirstSteps {
     $dir = '{0}\first15_{1}_{2}' -f $ReportDir, $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
     $cp = @{}; if ($ConfigPath) { $cp.ConfigPath = $ConfigPath }
+    $role = if (Test-CcdcIsDC) { 'domain controller: GPOs, DNS zones and AD objects are included' } elseif (Test-Path "$env:windir\System32\inetsrv\appcmd.exe") { 'IIS found: IIS config + web roots are included' } else { 'registry, tasks, firewall, users' }
     $steps = @(
-        @{ T = 'Snapshot: save how the box is right now (ORIGINAL if it is the first)'; Do = { & (Join-Path $here 'backup\Snapshot-State.ps1') -Mode Take -Label 'first15' @cp } }
-        @{ T = 'Box overview: what is this box, what is listening';               Do = { & (Join-Path $here 'recon\Get-BoxOverview.ps1') @cp -OutFile (Join-Path $dir 'overview.txt') } }
-        @{ T = 'Backup: registry, tasks, firewall, AD/DNS/GPO, IIS (writes only C:\ccdc\backups)'; Do = { & (Join-Path $here 'backup\Backup-Box.ps1') @cp } }
-        @{ T = 'LIVE ALERTS: turn on instant alerts (opens the watch window)';    Do = { Install-LiveAlerts } }
-        @{ T = 'Vulnerability check: Zerologon, PrintNightmare, EternalBlue, relay, cleartext creds...'; Do = { & (Join-Path $here 'audit\Audit-Vulns.ps1') @cp -OutFile (Join-Path $dir 'vulns.txt') } }
-        @{ T = 'Users & admins audit: who has admin, roastable, odd accounts';    Do = { & (Join-Path $here 'audit\Audit-Users.ps1') @cp -OutFile (Join-Path $dir 'users.txt') } }
-        @{ T = 'Persistence hunt: tasks, services, Run keys, web shells';         Do = { & (Join-Path $here 'audit\Audit-Persistence.ps1') @cp -OutFile (Join-Path $dir 'persistence.txt') } }
-        @{ T = 'Who is on this box + save baseline';                               Do = { & (Join-Path $here 'alerts\whoshere.ps1') -SaveBaseline } }
-        @{ T = 'Change-watch baseline (W -> 3 shows new users/tasks/services later)'; Do = { & (Join-Path $here 'hunt\Watch-Changes.ps1') @cp -Mode Baseline } }
-        @{ T = 'Scored services: check + save baseline (only if the scoreboard is green)'; Do = { & (Join-Path $here 'hunt\Test-ScoredServices.ps1') @cp -SaveBaseline } }
+        @{ T = 'Snapshot: record how the box is before anyone changes it';        Do = { & (Join-Path $here 'backup\Snapshot-State.ps1') -Mode Take -Label 'first15' @cp } }
+        @{ T = "Backup ($role)";                                                   Do = { & (Join-Path $here 'backup\Backup-Box.ps1') @cp } }
+        @{ T = 'LIVE ALERTS on (opens the watch window; keep it open)';            Do = { Install-LiveAlerts } }
+        @{ T = 'Who is on this box: every way in, who is connected now';           Do = { & (Join-Path $here 'alerts\whoshere.ps1') } }
+        @{ T = 'Users & admins: who has admin, risky accounts';                    Do = { & (Join-Path $here 'audit\Audit-Users.ps1') @cp -OutFile (Join-Path $dir 'users.txt') } }
+        @{ T = 'Vulnerability check: what Red Team can walk straight into';        Do = { & (Join-Path $here 'audit\Audit-Vulns.ps1') @cp -OutFile (Join-Path $dir 'vulns.txt') } }
     )
     Write-Host ''
     Write-Host '  FIRST 15 MINUTES - each step asks first; Enter = yes, n = skip.' -ForegroundColor Cyan
@@ -502,13 +514,12 @@ function Invoke-FirstSteps {
         try { & $s.Do } catch { Write-Host "  Step failed: $_" -ForegroundColor Red }
     }
     Write-Host ''
-    Write-Host '  Done. Next, by hand (each needs a decision):' -ForegroundColor Green
-    Write-Host '    [10] rotate passwords  (scored accounts: Password Change Request first)' -ForegroundColor Gray
-    Write-Host '    [X]  log off old sessions right after rotating' -ForegroundColor Gray
-    Write-Host '    [12] firewall allowlist (scored ports stay open to any source)' -ForegroundColor Gray
-    Write-Host '    [13] baseline hardening, [L] logging, then keep [C] looping in its own window' -ForegroundColor Gray
-    Write-Host '    Each change gets a snapshot first. Broke something? W shows what changed, U puts it back.' -ForegroundColor Gray
-    Write-Host '    D -> 3 trust the scoring engine IP as soon as you see it in an alert' -ForegroundColor Gray
+    Write-Host '  Done. Now, in this order (each one asks before changing anything):' -ForegroundColor Green
+    Write-Host '    [10] rotate admin passwords (scored accounts: Password Change Request first)' -ForegroundColor Gray
+    Write-Host '    [X]  kick + disable any admin account step 5 flagged that is not your team' -ForegroundColor Gray
+    Write-Host '    [12] hardening walkthrough: apply the SAFE steps' -ForegroundColor Gray
+    Write-Host '    [11] basic firewall' -ForegroundColor Gray
+    Write-Host '  Then: [3] persistence hunt, [E] find attacks. Broke something? W shows what changed, U puts it back.' -ForegroundColor Gray
 }
 
 function Show-Explain([string]$k) {
@@ -545,7 +556,7 @@ while ($true) {
         if ($m) { Get-Help (Join-Path $here $m.File) -Full | Out-Host -Paging }
     } elseif ($choice -eq 'A') {
         $dir = '{0}\{1}_{2}' -f $ReportDir, $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmmss')
-        foreach ($m in $menu | Where-Object { $_.Key -in '1', '2', '3', '4', '5', '6', '7' }) {
+        foreach ($m in $menu | Where-Object { $_.Key -in '1', '2', '3', '4', '5', '6' }) {
             if ($m.Key -eq '6' -and -not (Test-CcdcIsDC)) { continue }
             $p = @{ OutFile = (Join-Path $dir (([IO.Path]::GetFileNameWithoutExtension($m.File)) + '.txt')) }
             if ($ConfigPath) { $p.ConfigPath = $ConfigPath }

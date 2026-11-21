@@ -23,7 +23,7 @@
         * Kerberoastable accounts (users with an SPN): rotate to a 25+ char random password
         * Unconstrained delegation on non-DC accounts
         * Members of Domain Admins / Enterprise Admins / Schema Admins / Administrators
-        * ms-DS-MachineAccountQuota (fix: harden\Harden-Baseline.ps1 -Only MachineAccountQuotaZero)
+        * ms-DS-MachineAccountQuota (fix: panel 12 (Harden-Walkthrough, step MAQ))
 
     WHAT IT READS    user objects in the domain (LDAP, no module needed)
     WHAT IT CHANGES  userAccountControl bits on the accounts it lists; each one is
@@ -156,10 +156,10 @@ foreach ($g in 'Domain Admins', 'Enterprise Admins', 'Schema Admins', 'Administr
     if (-not $grp) { continue }
     $members = @(Find-Users "(&(objectCategory=person)(objectClass=user)(memberOf:1.2.840.113556.1.4.1941:=$($grp.Properties['distinguishedname'][0])))" | ForEach-Object { [string]$_.Properties['samaccountname'][0] } | Sort-Object)
     $lvl = if ($members.Count -gt 5 -or ($g -eq 'Schema Admins' -and $members.Count -gt 1)) { 'YELLOW' } else { 'INFO' }
-    Write-Finding -Level $lvl -Category 'Admins' -Message ("{0}: {1} member(s): {2}" -f $g, $members.Count, ($members -join ', ')) -Detail $(if ($lvl -eq 'YELLOW') { "Shrink to the minimum. Remove: Remove-ADGroupMember '$g' <user>   Disable unknown ones: harden\Disable-Accounts.ps1" } else { '' })
+    Write-Finding -Level $lvl -Category 'Admins' -Message ("{0}: {1} member(s): {2}" -f $g, $members.Count, ($members -join ', ')) -Detail $(if ($lvl -eq 'YELLOW') { "Shrink to the minimum. Remove: Remove-ADGroupMember '$g' <user>   Disable unknown ones: panel X (Kick-Block)" } else { '' })
 }
 $maq = ([ADSI]"LDAP://$domainDN").Properties['ms-DS-MachineAccountQuota'].Value
-if ($null -ne $maq -and [int]$maq -gt 0) { Write-Finding -Level YELLOW -Category 'Quota' -Message "ms-DS-MachineAccountQuota = ${maq}: any user can join that many computers to the domain." -Detail 'Fix: harden\Harden-Baseline.ps1 -Only MachineAccountQuotaZero' }
+if ($null -ne $maq -and [int]$maq -gt 0) { Write-Finding -Level YELLOW -Category 'Quota' -Message "ms-DS-MachineAccountQuota = ${maq}: any user can join that many computers to the domain." -Detail 'Fix: panel 12 (Harden-Walkthrough, step MAQ)' }
 
 if ($rollbackLines.Count -gt 1) {
     $rollbackLines | Set-Content -Path $rollback -Encoding UTF8 -WhatIf:$false

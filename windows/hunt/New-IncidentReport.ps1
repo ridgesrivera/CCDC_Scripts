@@ -10,7 +10,7 @@
 
         1. Candidate SOURCE ADDRESSES, ranked, each with the reasons it is
            suspicious (RDP logon as an admin, 40 failed logons, created a user...).
-        2. One merged TIMELINE: alerts from Watch-Events / Test-ScoredServices,
+        2. One merged TIMELINE: alerts from LIVE ALERTS / the toolkit alert file,
            logons from outside, account and group changes, new tasks and services,
            log clearing, and everything Remove-Persistence took out.
         3. What we REMOVED (with file hashes and creation times) and what we CHANGED.
@@ -180,7 +180,7 @@ foreach ($e in (Get-Events 'OpenSSH/Operational' "*[System[EventID=4 and $timeFi
         Add-Timeline $e.TimeCreated 'Logon' ("SSH login as {0} using {1}" -f $Matches[2], $Matches[1]) $Matches[3]
     }
 }
-# 6. Our own alert file (Watch-Events, Test-ScoredServices, scheduled Watch-Changes).
+# 6. Our own alert file (scheduled Watch-Changes and other toolkit alerts).
 $alertFile = Join-Path $script:CcdcAlertRoot ("alerts_{0}.csv" -f $env:COMPUTERNAME)
 $alerts = @()
 if (Test-Path $alertFile) {

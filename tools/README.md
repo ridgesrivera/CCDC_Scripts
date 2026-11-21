@@ -16,17 +16,17 @@ It downloads from the official source, checks the Microsoft signature on Sysinte
 ```powershell
 .\tools\Get-CcdcTools.ps1 -Verify      # every file re-hashed against the manifest; MISSING / MODIFIED = don't run it
 ```
-Then panel **`[T]` Vendor tool audits** (`windows\audit\Invoke-AuditTools.ps1`) runs them all read-only and prints the RED/YELLOW lines.
+Then run what you need by hand, e.g. `bin\pingcastle\PingCastle.exe --healthcheck` on the DC, `bin\sysinternals\autorunsc64.exe -a * -s -m -accepteula`. The panel does not wrap them (keeps the toolkit small).
 
 ## What gets staged, and why
 | Tool | Lands in | What it gives you | Used by |
 |------|----------|-------------------|---------|
-| **Sysinternals Suite** | `bin\sysinternals\` | `autorunsc` (every autostart location, with signatures), `sigcheck` (unsigned binaries), `accesschk` (weak service/file ACLs), `procexp`/`tcpview` (live GUI triage), `tcpvcon`, `handle`, `strings` | `[T]`, by hand |
+| **Sysinternals Suite** | `bin\sysinternals\` | `autorunsc` (every autostart location, with signatures), `sigcheck` (unsigned binaries), `accesschk` (weak service/file ACLs), `procexp`/`tcpview` (live GUI triage), `tcpvcon`, `handle`, `strings` | by hand |
 | **Sysmon** + SwiftOnSecurity config | `sysmon\` | process/network/file telemetry (event IDs 1, 3, 11...) | `logging\Setup-Logging.ps1` |
-| **PingCastle** | `bin\pingcastle\` | AD health check: a scored report of every AD weakness (old krbtgt, delegation, ACL paths, GPO issues). Run it on trex | `[T]` |
-| **Locksmith** | `bin\locksmith\` | AD Certificate Services misconfigs (ESC1-ESC16). Mode 0 = report only | `[T]` |
-| **Hayabusa** | `bin\hayabusa\` | Thousands of Sigma rules over the event logs: shows you what Red Team already *did* (mimikatz, PsExec, new services, log clearing...) | `[T]` |
-| winPEAS *(opt-in)* | `bin\peass\` | Attacker-style privesc enumeration | `[T]` with "also run winPEAS" |
+| **PingCastle** | `bin\pingcastle\` | AD health check: a scored report of every AD weakness (old krbtgt, delegation, ACL paths, GPO issues). Run it on trex | by hand |
+| **Locksmith** | `bin\locksmith\` | AD Certificate Services misconfigs (ESC1-ESC16). Mode 0 = report only | by hand |
+| **Hayabusa** | `bin\hayabusa\` | Thousands of Sigma rules over the event logs: shows you what Red Team already *did* (mimikatz, PsExec, new services, log clearing...) | by hand |
+| winPEAS *(opt-in)* | `bin\peass\` | Attacker-style privesc enumeration | by hand |
 | pspy, Lynis *(opt-in, Linux)* | `linux\` | pspy: watch processes/cron jobs live without root. Lynis: Linux hardening audit | copy to the Linux boxes |
 | linPEAS *(opt-in, Linux + offensive)* | `linux\` | Attacker-style privesc enumeration for Linux | by hand |
 

@@ -6,7 +6,7 @@
     PURPOSE
       Walks the common Windows persistence locations and flags anything that
       looks non-default. It does NOT remove anything - removal is a
-      deliberate, logged step (harden\Harden-Baseline.ps1 -Only IFEO, or by
+      deliberate, logged step (hunt\Remove-Persistence.ps1, or by
       hand following docs\incident-response.md).
 
     CHECKS
@@ -212,7 +212,7 @@ foreach ($base in @('HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image Fi
         if ($dbg) {
             $n++
             $lvl = if ($accessibility -contains $_.PSChildName.ToLower()) { 'RED' } else { 'YELLOW' }
-            Write-Finding -Level $lvl -Category 'IFEO' -Message ("{0} Debugger = {1}" -f $_.PSChildName, $dbg) -Detail 'Remove with: harden\Harden-Baseline.ps1 -Only RemoveIfeoDebuggers'
+            Write-Finding -Level $lvl -Category 'IFEO' -Message ("{0} Debugger = {1}" -f $_.PSChildName, $dbg) -Detail 'Remove with: panel R (hunt\Remove-Persistence.ps1)'
         }
     }
 }

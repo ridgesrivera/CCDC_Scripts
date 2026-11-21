@@ -1,5 +1,10 @@
 # Toolkit review: what each script is worth at competition
 
+> **Historical (2026-11-14 / 11-16).** Several scripts named here were merged or removed on 2026-11-21:
+> Harden-Baseline + Audit-SecurityPolicy became `harden\Harden-Walkthrough.ps1`; Disconnect-Sessions + Disable-Accounts became
+> `hunt\Kick-Block.ps1`; Watch-Events became `hunt\Find-Attacks.ps1`; Test-ScoredServices, Invoke-AuditTools and Audit-Software
+> were dropped. See the README for the current set.
+
 Reviewed 2026-11-14 against the Great Cretaceous pod (`config/example.great-cretaceous.json`):
 **3 Windows boxes** (trex DC 2016, fossil Win10, fernbank IIS 2022) and **6 Linux boxes** (pangea, laboratory, hatchery, hellcreek, badlands, tarpit).
 

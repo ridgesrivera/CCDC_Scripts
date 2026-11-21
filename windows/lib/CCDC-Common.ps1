@@ -313,7 +313,7 @@ function Get-CcdcScoredAccounts {
 
 function Get-CcdcAuditPolicyPlan {
     <#
-      The audit subcategories we turn on (used by Harden-Baseline and
+      The audit subcategories we turn on (used by Harden-Walkthrough and
       Setup-Logging so both agree). GUIDs are used instead of names because
       auditpol subcategory NAMES are localised on non-English Windows.
     #>
@@ -347,7 +347,7 @@ function Test-CcdcTranscriptionOn {
 
 # ---------------------------------------------------------------------------
 # Hunt helpers: event parsing, "is this IP ours?", alerts, evidence, quarantine.
-# Used by hunt\Watch-Events, hunt\Remove-Persistence, hunt\Test-ScoredServices
+# Used by hunt\Find-Attacks, hunt\Remove-Persistence, hunt\Kick-Block
 # and hunt\New-IncidentReport so they all write to the same places:
 #   C:\ccdc\alerts\alerts_<HOST>.csv        one row per alert (time, rule, user, source IP)
 #   C:\ccdc\evidence\evidence_<HOST>.jsonl  one JSON object per thing we removed
@@ -453,8 +453,8 @@ function Get-CcdcIpClass {
 function Write-CcdcAlert {
     <#
       Appends one row to C:\ccdc\alerts\alerts_<HOST>.csv. This file is the
-      shared "what did we see, when, from where" record: Watch-Events,
-      Test-ScoredServices and the scheduled Watch-Changes all write to it,
+      shared "what did we see, when, from where" record: the scheduled
+      Watch-Changes writes to it,
       and New-IncidentReport reads it. Never pass secrets in -Detail.
     #>
     param(

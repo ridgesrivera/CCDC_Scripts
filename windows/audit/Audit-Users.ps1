@@ -22,7 +22,7 @@
       shown on SCREEN ONLY and never written to the log or report.
 
     HOW TO UNDO
-      Nothing to undo. To act on findings use harden\Disable-Accounts.ps1 and
+      Nothing to undo. To act on findings use hunt\Kick-Block.ps1 (panel X) and
       harden\Rotate-Passwords.ps1.
 
     MANUAL EQUIVALENT
@@ -97,8 +97,9 @@ if (-not $isDC) {
 # ---------------------------------------------------------------------------
 # Local / builtin group membership (on a DC these ARE the domain builtin groups)
 # ---------------------------------------------------------------------------
-Write-Section 'Privileged local/builtin groups'
-foreach ($g in @('Administrators', 'Remote Desktop Users', 'Backup Operators', 'Remote Management Users')) {
+# On a DC these groups ARE the domain builtin groups: the domain section below covers them.
+if (-not $isDC) { Write-Section 'Privileged local/builtin groups' }
+foreach ($g in @(if (-not $isDC) { 'Administrators', 'Remote Desktop Users', 'Backup Operators', 'Remote Management Users' })) {
     try {
         # The WinNT provider lists members, including orphaned SIDs that break Get-LocalGroupMember.
         $grp = [ADSI]"WinNT://./$g,group"
@@ -140,101 +141,114 @@ if (-not $rootDse -or -not $rootDse.defaultNamingContext) {
     Write-Section "Domain privileged groups ($domainDN)"
     $userProps = @('sAMAccountName', 'userAccountControl', 'whenCreated', 'whenChanged', 'description', 'info', 'servicePrincipalName', 'adminCount', 'pwdLastSet', 'distinguishedName')
 
+    # One line per group. '!' = not a default/expected member. Recursive (nested groups count).
     $privGroups = @('Domain Admins', 'Enterprise Admins', 'Schema Admins', 'Administrators', 'DnsAdmins',
                     'Backup Operators', 'Account Operators', 'Server Operators', 'Print Operators',
                     'Remote Desktop Users', 'Group Policy Creator Owners')
-    $privMembers = @{}   # sAMAccountName -> list of groups (used for adminCount check below)
+    $topGroups = @('Domain Admins', 'Enterprise Admins', 'Schema Admins', 'Administrators')
+    $privMembers = @{}   # sAMAccountName -> list of groups
+    $empty = @()
     foreach ($gName in $privGroups) {
         $g = Search-Ldap -Filter "(&(objectClass=group)(sAMAccountName=$gName))" -Properties @('distinguishedName')
         if ($g.Count -eq 0) { continue }
         $gDN = Get-Prop $g[0] 'distinguishedname'
         # 1.2.840.113556.1.4.1941 = LDAP_MATCHING_RULE_IN_CHAIN -> RECURSIVE membership (nested groups too).
-        $members = Search-Ldap -Filter "(&(|(objectClass=user)(objectClass=computer))(memberOf:1.2.840.113556.1.4.1941:=$gDN))" -Properties $userProps
-        if ($members.Count -eq 0) { Write-Finding -Level GREEN -Category 'DomainGroup' -Message "$gName : (empty)"; continue }
+        $members = @(Search-Ldap -Filter "(&(|(objectClass=user)(objectClass=computer))(memberOf:1.2.840.113556.1.4.1941:=$gDN))" -Properties $userProps)
+        if ($members.Count -eq 0) { $empty += $gName; continue }
+        $names = @(); $unexpected = 0
         foreach ($m in $members) {
             $sam = [string](Get-Prop $m 'samaccountname')
-            $uac = [int](Get-Prop $m 'useraccountcontrol')
+            $off = ([int](Get-Prop $m 'useraccountcontrol')) -band $UAC_DISABLED
             if (-not $privMembers.ContainsKey($sam)) { $privMembers[$sam] = @() }
             $privMembers[$sam] += $gName
-            $state = if ($uac -band $UAC_DISABLED) { 'disabled' } else { 'ENABLED' }
-            $lvl = 'YELLOW'
-            if ($gName -in @('Domain Admins', 'Enterprise Admins', 'Schema Admins', 'Administrators')) {
-                $lvl = if (Test-Expected $sam) { 'GREEN' } else { 'RED' }
-            }
-            if ($gName -eq 'DnsAdmins' -or $gName -eq 'Schema Admins' -or $gName -eq 'Enterprise Admins') {
-                if (-not (Test-Expected $sam)) { $lvl = 'RED' }   # these should be (nearly) empty
-            }
-            if ($uac -band $UAC_DISABLED) { $lvl = 'INFO' }
-            Write-Finding -Level $lvl -Category 'DomainGroup' -Message ("{0,-22} <- {1,-20} {2}" -f $gName, $sam, $state)
+            $odd = -not (Test-Expected $sam)
+            if ($odd -and -not $off) { $unexpected++ }
+            $names += ('{0}{1}{2}' -f $sam, $(if ($odd) { ' !' } else { '' }), $(if ($off) { ' (disabled)' } else { '' }))
         }
+        $lvl = if ($unexpected -eq 0) { 'GREEN' } elseif ($gName -in $topGroups -or $gName -eq 'DnsAdmins') { 'RED' } else { 'YELLOW' }
+        Write-Finding -Level $lvl -Category 'DomainGroup' -Message ("{0} ({1}): {2}" -f $gName, $members.Count, ($names -join ', '))
     }
+    if ($empty) { Write-Finding -Level GREEN -Category 'DomainGroup' -Message ("Empty (good): {0}" -f ($empty -join ', ')) }
+    Write-Host '       ! = not a default member. Admin-level groups should hold only the accounts your team uses. Remove the rest (panel 10/X) after checking nothing scored depends on them.' -ForegroundColor DarkGray
 
-    # One pass over all users for the per-account checks.
-    Write-Section 'Domain account risk checks'
-    $users = Search-Ldap -Filter '(&(objectCategory=person)(objectClass=user))' -Properties $userProps
+    # One pass over all users, collected into buckets so each problem prints ONCE with its list.
+    Write-Section 'Domain account risks (grouped)'
+    $users = @(Search-Ldap -Filter '(&(objectCategory=person)(objectClass=user))' -Properties $userProps)
+    $b = @{ NoPw = @(); AsRep = @(); Kerb = @(); KerbPriv = @(); Deleg = @(); PwDesc = @(); Orphan = @(); Never = 0 }
+    $created = @()
     $enabled = 0
+    $buildTime = $null
     foreach ($u in $users) {
         $sam = [string](Get-Prop $u 'samaccountname')
         $uac = [int](Get-Prop $u 'useraccountcontrol')
         $isEnabled = -not ($uac -band $UAC_DISABLED)
         if ($isEnabled) { $enabled++ }
-
-        if ($uac -band $UAC_PASSWD_NOTREQD) {
-            Write-Finding -Level RED -Category 'Account' -Message "$sam : PASSWD_NOTREQD set (account may have an empty password)"
-        }
-        if ($uac -band $UAC_DONT_REQ_PREAUTH) {
-            Write-Finding -Level RED -Category 'ASREPRoast' -Message "$sam : Kerberos pre-auth NOT required -> AS-REP roastable" -Detail 'Fix: Set-ADAccountControl <user> -DoesNotRequirePreAuth $false'
-        }
-        if ($isEnabled -and ($uac -band $UAC_DONT_EXPIRE_PASSWD)) {
-            Write-Finding -Level YELLOW -Category 'PwNeverExpires' -Message "$sam : password never expires"
-        }
-        if (($uac -band $UAC_TRUSTED_FOR_DELEG) -and $sam -notmatch '\$$') {
-            Write-Finding -Level RED -Category 'Delegation' -Message "$sam : user trusted for UNCONSTRAINED delegation"
-        }
-        $spns = $u.Properties['serviceprincipalname']
-        if ($spns.Count -gt 0 -and $sam -ne 'krbtgt') {
-            $lvl = if ($privMembers.ContainsKey($sam)) { 'RED' } else { 'YELLOW' }
-            Write-Finding -Level $lvl -Category 'Kerberoast' -Message "$sam : has SPN -> Kerberoastable$(if ($lvl -eq 'RED') { ' AND privileged' })" -Detail (($spns | Select-Object -First 3) -join '; ')
-        }
+        $wc = Get-Prop $u 'whencreated'; if ($wc) { $created += [pscustomobject]@{ Sam = $sam; Time = [datetime]$wc } }
+        if ($sam -eq 'krbtgt' -and $wc) { $buildTime = [datetime]$wc }   # krbtgt is created when the domain is built
+        if (-not $isEnabled) { continue }
+        if ($uac -band $UAC_PASSWD_NOTREQD) { $b.NoPw += $sam }
+        if ($uac -band $UAC_DONT_REQ_PREAUTH) { $b.AsRep += $sam }
+        if ($uac -band $UAC_DONT_EXPIRE_PASSWD) { $b.Never++ }
+        if (($uac -band $UAC_TRUSTED_FOR_DELEG) -and $sam -notmatch '\$$') { $b.Deleg += $sam }
+        if ($u.Properties['serviceprincipalname'].Count -gt 0 -and $sam -ne 'krbtgt') { if ($privMembers.ContainsKey($sam)) { $b.KerbPriv += $sam } else { $b.Kerb += $sam } }
         foreach ($field in @('description', 'info')) {
             $val = [string](Get-Prop $u $field)
-            if ($val -and $val -match $pwRegex) {
-                Write-Finding -Level RED -Category 'PwInDescription' -Message "$sam : '$field' field may contain a password (shown on screen only)"
-                Write-Host "       ${field}: $val" -ForegroundColor DarkYellow   # screen only - never logged/reported
-            }
+            if ($val -and $val -match $pwRegex) { $b.PwDesc += "$sam ($field)"; Write-Host "       ${sam} ${field}: $val" -ForegroundColor DarkYellow }   # screen only - never logged
         }
-        $created = Get-Prop $u 'whencreated'
-        $changed = Get-Prop $u 'whenchanged'
-        if ($created -and [datetime]$created -gt $cutoff) {
-            Write-Finding -Level RED -Category 'Recent' -Message "$sam : CREATED $created (within $RecentDays days)"
-        } elseif ($changed -and [datetime]$changed -gt $cutoff -and $isEnabled) {
-            Write-Finding -Level INFO -Category 'Recent' -Message "$sam : modified $changed"
-        }
-        if ([int](Get-Prop $u 'admincount') -eq 1) {
-            if ($privMembers.ContainsKey($sam)) {
-                Write-Finding -Level INFO -Category 'AdminSDHolder' -Message "$sam : adminCount=1 (protected; in $($privMembers[$sam] -join ', '))"
-            } else {
-                Write-Finding -Level YELLOW -Category 'AdminSDHolder' -Message "$sam : adminCount=1 but NOT in a privileged group now (former admin? check its ACL)"
-            }
-        }
+        if ([int](Get-Prop $u 'admincount') -eq 1 -and -not $privMembers.ContainsKey($sam) -and $sam -ne 'krbtgt') { $b.Orphan += $sam }
     }
+    function Show-Bucket([string]$lvl, [string]$cat, [string]$title, $list, [string]$why) {
+        if (@($list).Count -eq 0) { return }
+        Write-Finding -Level $lvl -Category $cat -Message ("{0} ({1}): {2}" -f $title, @($list).Count, (@($list) -join ', ')) -Detail $why
+    }
+    Show-Bucket RED 'Kerberoast' 'Kerberoastable AND privileged' $b.KerbPriv 'Any domain user can request a ticket for these and crack the password offline, then they are admin. Fix: long random password (panel 10), take it out of admin groups if you can.'
+    Show-Bucket RED 'ASREPRoast' 'AS-REP roastable (no Kerberos pre-auth)' $b.AsRep 'Anyone can get a crackable hash for these WITHOUT a password. Fix: panel 12 (hardening walkthrough) or Set-ADAccountControl <user> -DoesNotRequirePreAuth $false'
+    Show-Bucket RED 'NoPassword' 'Password not required (PASSWD_NOTREQD)' $b.NoPw 'These may have an EMPTY password. Fix: panel 12, or set a password and clear the flag.'
+    Show-Bucket RED 'PwInDescription' 'Password written in the description' $b.PwDesc 'Anyone in the domain can read descriptions. Change that password and clear the field.'
+    Show-Bucket RED 'Delegation' 'Unconstrained delegation on a user' $b.Deleg 'Their tickets can be used to impersonate anyone. Remove "Trust this user for delegation".'
+    Show-Bucket YELLOW 'Kerberoast' 'Kerberoastable (service accounts with an SPN)' $b.Kerb 'Crackable offline if the password is weak. Give them long random passwords (check what service uses them first).'
+    Show-Bucket YELLOW 'AdminSDHolder' 'adminCount=1 but not in an admin group now' $b.Orphan 'A former admin, or a sign someone was briefly made admin. Check who changed it.'
+    if ($b.Never) { Write-Finding -Level INFO -Category 'PwNeverExpires' -Message ("{0} enabled accounts have 'password never expires' (normal in labs; not a priority mid-competition)" -f $b.Never) }
+
+    # Account creation: bulk batches = environment setup; accounts made alone AFTER setup = look at these.
+    Write-Section 'When accounts were created'
+    $batches = @($created | Group-Object { $_.Time.ToString('yyyy-MM-dd HH:mm') } | Sort-Object Name)
+    $bulk = @($batches | Where-Object { $_.Count -ge 5 })
+    if ($bulk) { Write-Finding -Level INFO -Category 'Created' -Message ("Created in bulk (environment setup): {0}" -f (($bulk | ForEach-Object { "$($_.Name) ($($_.Count))" }) -join ', ')) }
+    $setupEnd = if ($bulk) { [datetime]::ParseExact($bulk[-1].Name, 'yyyy-MM-dd HH:mm', $null).AddMinutes(1) } elseif ($buildTime) { $buildTime.AddMinutes(30) } else { [datetime]::MinValue }
+    $late = @($created | Where-Object { $_.Time -gt $setupEnd } | Sort-Object Time)
+    if ($late) { Write-Finding -Level RED -Category 'Created' -Message ("Created on their own AFTER setup ({0}): {1}" -f $late.Count, (($late | ForEach-Object { '{0} {1}' -f $_.Sam, $_.Time.ToString('MM-dd HH:mm') }) -join ', ')) -Detail 'Nobody on your team made these? Treat them as Red Team: panel X (kick + disable).' }
+    else { Write-Finding -Level GREEN -Category 'Created' -Message 'No accounts created after the setup batches.' }
     Write-Finding -Level INFO -Category 'Account' -Message ("{0} domain user accounts, {1} enabled" -f $users.Count, $enabled)
 }
 
 # ---------------------------------------------------------------------------
-# Security log: recent account creation / group adds (works local + domain)
+# Security log: privileged group adds listed one by one; everything else summarized
 # ---------------------------------------------------------------------------
-Write-Section "Security log: account created / added to group (last $RecentDays days)"
-$evIds = @{ 4720 = 'user created'; 4728 = 'added to global group'; 4732 = 'added to local group'; 4756 = 'added to universal group' }
+Write-Section "Security log: accounts created / added to groups (last $RecentDays days)"
+$privNames = @('Domain Admins', 'Enterprise Admins', 'Schema Admins', 'Administrators', 'DnsAdmins', 'Backup Operators', 'Account Operators', 'Server Operators', 'Group Policy Creator Owners', 'Remote Desktop Users', 'Remote Management Users', 'Pre-Windows 2000 Compatible Access')
 try {
-    $events = Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = @($evIds.Keys); StartTime = $cutoff } -MaxEvents 200 -ErrorAction Stop
-    foreach ($e in $events) {
-        $xml = [xml]$e.ToXml()
-        $data = @{}; foreach ($d in $xml.Event.EventData.Data) { $data[$d.Name] = $d.'#text' }
-        $who  = "$($data['SubjectDomainName'])\$($data['SubjectUserName'])"
-        $what = if ($e.Id -eq 4720) { $data['TargetUserName'] } else { "$($data['MemberName']) -> $($data['TargetUserName'])" }
-        Write-Finding -Level YELLOW -Category 'SecLog' -Message ("{0}  {1}: {2}  (by {3})" -f $e.TimeCreated, $evIds[$e.Id], $what, $who)
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4720, 4728, 4732, 4756; StartTime = $cutoff } -MaxEvents 2000 -ErrorAction Stop)
+    $made = @(); $other = 0
+    foreach ($e in ($events | Sort-Object TimeCreated)) {
+        $d = Get-CcdcEventData -Record $e
+        $who = "$($d['SubjectDomainName'])\$($d['SubjectUserName'])"
+        if ($d['SubjectUserName'] -match '\$$|^ANONYMOUS LOGON$|^-$') { continue }   # Windows itself (domain build, machine setup)
+        if ($e.Id -eq 4720) { $made += [pscustomobject]@{ T = $e.TimeCreated.ToString('MM-dd HH:mm'); Who = $who; Name = $d['TargetUserName'] }; continue }
+        if ($privNames -contains $d['TargetUserName']) {
+            $member = ($d['MemberName'] -replace '^CN=([^,]+),.*$', '$1'); if (-not $member -or $member -eq '-') { $member = $d['MemberSid'] }
+            Write-Finding -Level RED -Category 'SecLog' -Message ("{0}  {1} -> {2}  (by {3})" -f $e.TimeCreated.ToString('MM-dd HH:mm'), $member, $d['TargetUserName'], $who)
+        } else { $other++ }
     }
+    foreach ($g in ($made | Group-Object T, Who)) {
+        $lvl = if ($g.Count -ge 5) { 'INFO' } else { 'YELLOW' }
+        $first = $g.Group[0]
+        $list = ($g.Group | Select-Object -First 8 | ForEach-Object { $_.Name }) -join ', '
+        if ($g.Count -gt 8) { $list += ", ... +$($g.Count - 8) more" }
+        Write-Finding -Level $lvl -Category 'SecLog' -Message ("{0}  {1} account(s) created by {2}: {3}" -f $first.T, $g.Count, $first.Who, $list)
+    }
+    if ($other) { Write-Finding -Level INFO -Category 'SecLog' -Message "$other add(s) to non-admin groups (not listed)." }
+    if (-not $events) { Write-Finding -Level INFO -Category 'SecLog' -Message 'No matching events.' }
 } catch {
     Write-Finding -Level INFO -Category 'SecLog' -Message 'No matching events (or Security log not readable / auditing off).'
 }

@@ -15,7 +15,7 @@
     WHAT IT READS   Get-NetTCPConnection, Get-NetFirewall*, Get-SmbServerConfiguration,
                     Get-SmbShare/Get-SmbShareAccess, registry (LanmanServer, Terminal Server, WSMAN)
     WHAT IT CHANGES nothing (own log + optional report)
-    HOW TO UNDO     nothing to undo. Fixes live in harden\Set-Firewall.ps1 and harden\Harden-Baseline.ps1.
+    HOW TO UNDO     nothing to undo. Fixes live in harden\Set-Firewall.ps1 and harden\Harden-Walkthrough.ps1.
 
     MANUAL EQUIVALENT
       netstat -ano | findstr ESTABLISHED
